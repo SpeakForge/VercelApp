@@ -29,16 +29,25 @@ export default function Home() {
   const poseRef = useRef<PoseLandmarker | null>(null);
   const rafRef = useRef<number | null>(null);
 
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioDataRef = useRef<Uint8Array | null>(null);
+  const volumeHistoryRef = useRef<number[]>([]);
+  const audioRafRef = useRef<number | null>(null);
+
   const [status, setStatus] = useState("Requesting camera/mic...");
   const [transcript, setTranscript] = useState("");
   const [recentTranscript, setRecentTranscript] = useState("");
   const [startedAt, setStartedAt] = useState<number | null>(null);
-  const [wordCount, setWordCount] = useState(0);
   const [wpm, setWpm] = useState(0);
   const [fillerCount, setFillerCount] = useState(0);
 
   const [gestureEnergy, setGestureEnergy] = useState(0);
   const [postureScore, setPostureScore] = useState(0);
+
+  const [volumeLevel, setVolumeLevel] = useState(0);
+  const [energyScore, setEnergyScore] = useState(0);
+  const [variationScore, setVariationScore] = useState(0);
 
   const lastHandsRef = useRef<{ t: number; lx: number; ly: number; rx: number; ry: number } | null>(null);
 
@@ -54,16 +63,78 @@ export default function Home() {
           video: true,
           audio: true
         });
+
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
         }
+
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioCtxRef.current = audioCtx;
+
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        analyserRef.current = analyser;
+
+        source.connect(analyser);
+        audioDataRef.current = new Uint8Array(analyser.fftSize);
+
         setStatus("Live");
       } catch {
         setStatus("Permission denied or no camera/mic found.");
       }
     };
     startCam();
+
+    return () => {
+      if (audioRafRef.current) cancelAnimationFrame(audioRafRef.current);
+      audioCtxRef.current?.close();
+      audioCtxRef.current = null;
+      analyserRef.current = null;
+      audioDataRef.current = null;
+      volumeHistoryRef.current = [];
+    };
+  }, []);
+
+  useEffect(() => {
+    const tick = () => {
+      const analyser = analyserRef.current;
+      const data = audioDataRef.current;
+
+      if (analyser && data) {
+        analyser.getByteTimeDomainData(data);
+
+        let sumSq = 0;
+        for (let i = 0; i < data.length; i++) {
+          const v = (data[i] - 128) / 128;
+          sumSq += v * v;
+        }
+        const rms = Math.sqrt(sumSq / data.length);
+        const level = Math.min(1, rms * 2.5);
+
+        setVolumeLevel(level);
+        setEnergyScore((prev) => prev * 0.85 + level * 0.15);
+
+        const hist = volumeHistoryRef.current;
+        hist.push(level);
+        if (hist.length > 60) hist.shift();
+
+        const mean = hist.reduce((a, b) => a + b, 0) / hist.length;
+        const variance = hist.reduce((a, b) => a + (b - mean) * (b - mean), 0) / hist.length;
+        const std = Math.sqrt(variance);
+
+        const varScore = clamp01(std * 6);
+        setVariationScore(varScore);
+      }
+
+      audioRafRef.current = requestAnimationFrame(tick);
+    };
+
+    audioRafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (audioRafRef.current) cancelAnimationFrame(audioRafRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -80,21 +151,21 @@ export default function Home() {
     rec.onresult = (event: any) => {
       let finalFull = "";
       let interim = "";
-    
+
       for (let i = 0; i < event.results.length; i++) {
         const chunk = event.results[i][0]?.transcript || "";
         if (event.results[i].isFinal) finalFull += chunk + " ";
       }
-    
+
       const lastIndex = event.results.length - 1;
       if (lastIndex >= 0 && !event.results[lastIndex].isFinal) {
         interim = (event.results[lastIndex][0]?.transcript || "").trim();
       }
-    
+
       const finalTrimmed = finalFull.trim();
       setTranscript(finalTrimmed);
       setRecentTranscript(interim);
-    
+
       if (!startedAt) setStartedAt(Date.now());
     };
 
@@ -110,11 +181,12 @@ export default function Home() {
     if (!startedAt) return;
     const id = setInterval(() => {
       const seconds = (Date.now() - startedAt) / 1000;
-      setWpm(estimateWpm(wordCount, seconds));
+      const words = transcript.split(/\s+/).filter(Boolean).length;
+      setWpm(estimateWpm(words, seconds));
       setFillerCount(countFillers(transcript));
     }, 1000);
     return () => clearInterval(id);
-  }, [startedAt, wordCount, transcript]);
+  }, [startedAt, transcript]);
 
   useEffect(() => {
     const initPose = async () => {
@@ -235,6 +307,21 @@ export default function Home() {
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span>Posture score</span>
           <b>{postureScore.toFixed(2)}</b>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <span>Volume</span>
+          <b>{volumeLevel.toFixed(2)}</b>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <span>Energy</span>
+          <b>{energyScore.toFixed(2)}</b>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <span>Variation</span>
+          <b>{variationScore.toFixed(2)}</b>
         </div>
 
         <div>
