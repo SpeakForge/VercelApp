@@ -1,352 +1,517 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
+import Link from "next/link";
 
-function countFillers(text: string) {
-  const fillers = ["um", "uh", "like", "you know", "so"];
-  const lower = (text || "").toLowerCase();
-  let count = 0;
-  for (const f of fillers) {
-    const re = new RegExp(`\\b${f.replace(" ", "\\s+")}\\b`, "g");
-    const matches = lower.match(re);
-    if (matches) count += matches.length;
-  }
-  return count;
-}
+const NAV_LINKS = ["What is SpeakForge?", "How It Works", "Features", "Pricing"];
 
-function estimateWpm(words: number, seconds: number) {
-  if (!seconds || seconds <= 0) return 0;
-  return Math.round((words / seconds) * 60);
-}
+const STATS = [
+  { icon: "🎤", label: "Real-Time", sub: "Live Feedback" },
+  { icon: "✅", label: "95%+", sub: "Accuracy" },
+  { icon: "⭐", label: "AI Coach", sub: "Always On" },
+];
 
-function clamp01(x: number) {
-  return Math.max(0, Math.min(1, x));
-}
+const FEATURES_LEFT = [
+  {
+    icon: "🎤",
+    title: "Live speech transcription",
+    desc: "Every word you say appears instantly so you can track what you're actually saying.",
+  },
+  {
+    icon: "⏱️",
+    title: "WPM & filler word detection",
+    desc: "Counts your ums, uhs, and likes in real time so you can cut them out.",
+  },
+  {
+    icon: "🕺",
+    title: "Pose-based gesture analysis",
+    desc: "MediaPipe tracks your wrist movement to score how expressive your gestures are.",
+  },
+];
 
-export default function Home() {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const poseRef = useRef<PoseLandmarker | null>(null);
-  const rafRef = useRef<number | null>(null);
+const FEATURES_RIGHT = [
+  {
+    icon: "🧍",
+    color: "#e0e7ff",
+    iconColor: "#6366f1",
+    title: "Posture Scoring",
+    desc: "Shoulder tilt and head position are analyzed so you always look confident.",
+  },
+  {
+    icon: "🔊",
+    color: "#dcfce7",
+    iconColor: "#22c55e",
+    title: "Volume & Energy",
+    desc: "Real-time RMS energy meter keeps your delivery loud and engaging.",
+  },
+  {
+    icon: "📈",
+    color: "#fef9c3",
+    iconColor: "#eab308",
+    title: "Variation Score",
+    desc: "Detects monotone delivery and nudges you to vary your vocal dynamics.",
+  },
+  {
+    icon: "🧠",
+    color: "#fce7f3",
+    iconColor: "#ec4899",
+    title: "AI-Powered Insights",
+    desc: "All metrics combined into one live coaching dashboard — no setup needed.",
+  },
+];
 
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const audioDataRef = useRef<Uint8Array | null>(null);
-  const volumeHistoryRef = useRef<number[]>([]);
-  const audioRafRef = useRef<number | null>(null);
-
-  const [status, setStatus] = useState("Requesting camera/mic...");
-  const [transcript, setTranscript] = useState("");
-  const [recentTranscript, setRecentTranscript] = useState("");
-  const [startedAt, setStartedAt] = useState<number | null>(null);
-  const [wpm, setWpm] = useState(0);
-  const [fillerCount, setFillerCount] = useState(0);
-
-  const [gestureEnergy, setGestureEnergy] = useState(0);
-  const [postureScore, setPostureScore] = useState(0);
-
-  const [volumeLevel, setVolumeLevel] = useState(0);
-  const [energyScore, setEnergyScore] = useState(0);
-  const [variationScore, setVariationScore] = useState(0);
-
-  const lastHandsRef = useRef<{ t: number; lx: number; ly: number; rx: number; ry: number } | null>(null);
-
-  const SpeechRecognition = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-  }, []);
-
-  useEffect(() => {
-    const startCam = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true
-        });
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        audioCtxRef.current = audioCtx;
-
-        const source = audioCtx.createMediaStreamSource(stream);
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 2048;
-        analyserRef.current = analyser;
-
-        source.connect(analyser);
-        audioDataRef.current = new Uint8Array(analyser.fftSize);
-
-        setStatus("Live");
-      } catch {
-        setStatus("Permission denied or no camera/mic found.");
-      }
-    };
-    startCam();
-
-    return () => {
-      if (audioRafRef.current) cancelAnimationFrame(audioRafRef.current);
-      audioCtxRef.current?.close();
-      audioCtxRef.current = null;
-      analyserRef.current = null;
-      audioDataRef.current = null;
-      volumeHistoryRef.current = [];
-    };
-  }, []);
-
-  useEffect(() => {
-    const tick = () => {
-      const analyser = analyserRef.current;
-      const data = audioDataRef.current;
-
-      if (analyser && data) {
-        analyser.getByteTimeDomainData(data);
-
-        let sumSq = 0;
-        for (let i = 0; i < data.length; i++) {
-          const v = (data[i] - 128) / 128;
-          sumSq += v * v;
-        }
-        const rms = Math.sqrt(sumSq / data.length);
-        const level = Math.min(1, rms * 2.5);
-
-        setVolumeLevel(level);
-        setEnergyScore((prev) => prev * 0.85 + level * 0.15);
-
-        const hist = volumeHistoryRef.current;
-        hist.push(level);
-        if (hist.length > 60) hist.shift();
-
-        const mean = hist.reduce((a, b) => a + b, 0) / hist.length;
-        const variance = hist.reduce((a, b) => a + (b - mean) * (b - mean), 0) / hist.length;
-        const std = Math.sqrt(variance);
-
-        const varScore = clamp01(std * 6);
-        setVariationScore(varScore);
-      }
-
-      audioRafRef.current = requestAnimationFrame(tick);
-    };
-
-    audioRafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (audioRafRef.current) cancelAnimationFrame(audioRafRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!SpeechRecognition) {
-      setStatus("Use Chrome for live transcript (SpeechRecognition not found).");
-      return;
-    }
-
-    const rec = new SpeechRecognition();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = "en-US";
-
-    rec.onresult = (event: any) => {
-      let finalFull = "";
-      let interim = "";
-
-      for (let i = 0; i < event.results.length; i++) {
-        const chunk = event.results[i][0]?.transcript || "";
-        if (event.results[i].isFinal) finalFull += chunk + " ";
-      }
-
-      const lastIndex = event.results.length - 1;
-      if (lastIndex >= 0 && !event.results[lastIndex].isFinal) {
-        interim = (event.results[lastIndex][0]?.transcript || "").trim();
-      }
-
-      const finalTrimmed = finalFull.trim();
-      setTranscript(finalTrimmed);
-      setRecentTranscript(interim);
-
-      if (!startedAt) setStartedAt(Date.now());
-    };
-
-    rec.onerror = () => {
-      setStatus("Mic/transcript error. Check permissions.");
-    };
-
-    rec.start();
-    return () => rec.stop();
-  }, [SpeechRecognition, startedAt]);
-
-  useEffect(() => {
-    if (!startedAt) return;
-    const id = setInterval(() => {
-      const seconds = (Date.now() - startedAt) / 1000;
-      const words = transcript.split(/\s+/).filter(Boolean).length;
-      setWpm(estimateWpm(words, seconds));
-      setFillerCount(countFillers(transcript));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [startedAt, transcript]);
-
-  useEffect(() => {
-    const initPose = async () => {
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-      );
-
-      poseRef.current = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
-        },
-        runningMode: "VIDEO",
-        numPoses: 1
-      });
-    };
-
-    initPose();
-
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      poseRef.current?.close();
-      poseRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    const loop = () => {
-      const video = videoRef.current;
-      const pose = poseRef.current;
-
-      if (video && pose && video.readyState >= 2) {
-        const t = performance.now();
-        const res = pose.detectForVideo(video, t);
-
-        const lm = res.landmarks?.[0];
-        if (lm) {
-          const leftWrist = lm[15];
-          const rightWrist = lm[16];
-          const leftShoulder = lm[11];
-          const rightShoulder = lm[12];
-          const nose = lm[0];
-
-          const visOk =
-            (leftWrist?.visibility ?? 0) > 0.4 &&
-            (rightWrist?.visibility ?? 0) > 0.4 &&
-            (leftShoulder?.visibility ?? 0) > 0.4 &&
-            (rightShoulder?.visibility ?? 0) > 0.4;
-
-          if (visOk) {
-            const last = lastHandsRef.current;
-            if (last) {
-              const dt = (t - last.t) / 1000;
-              if (dt > 0) {
-                const dL = Math.hypot(leftWrist.x - last.lx, leftWrist.y - last.ly);
-                const dR = Math.hypot(rightWrist.x - last.rx, rightWrist.y - last.ry);
-                const speed = (dL + dR) / dt;
-                const energy = clamp01(speed / 2.2);
-                setGestureEnergy(energy);
-              }
-            }
-            lastHandsRef.current = { t, lx: leftWrist.x, ly: leftWrist.y, rx: rightWrist.x, ry: rightWrist.y };
-
-            const shoulderTilt = Math.abs(leftShoulder.y - rightShoulder.y);
-            const tiltScore = clamp01(1 - shoulderTilt * 10);
-
-            const headUp = nose.y < (leftShoulder.y + rightShoulder.y) / 2;
-            const headScore = headUp ? 1 : 0.4;
-
-            setPostureScore(clamp01(0.65 * tiltScore + 0.35 * headScore));
-          }
-        }
-      }
-
-      rafRef.current = requestAnimationFrame(loop);
-    };
-
-    rafRef.current = requestAnimationFrame(loop);
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, []);
-
+export default function LandingPage() {
   return (
-    <div style={{ padding: 40, maxWidth: 980, margin: "0 auto" }}>
-      <h1>SpeakForge Live Coach</h1>
-      <div style={{ marginBottom: 12, color: "#555" }}>{status}</div>
-
-      <video
-        ref={videoRef}
-        playsInline
-        muted
-        style={{
-          width: "100%",
-          maxWidth: 720,
-          borderRadius: 12,
-          background: "#111",
-          transform: "scaleX(-1)"
-        }}
-      />
-
-      <div style={{ marginTop: 20, display: "grid", gap: 10, maxWidth: 720 }}>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>WPM</span>
-          <b>{wpm}</b>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Filler count</span>
-          <b>{fillerCount}</b>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Gesture energy</span>
-          <b>{gestureEnergy.toFixed(2)}</b>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Posture score</span>
-          <b>{postureScore.toFixed(2)}</b>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Volume</span>
-          <b>{volumeLevel.toFixed(2)}</b>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Energy</span>
-          <b>{energyScore.toFixed(2)}</b>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Variation</span>
-          <b>{variationScore.toFixed(2)}</b>
-        </div>
-
-        <div>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Recent transcript</div>
-          <div style={{ border: "1px solid #ddd", borderRadius: 10, padding: 10, minHeight: 48 }}>
-            {recentTranscript || "(waiting...)"} 
+    <div
+      style={{
+        background: "#f4f6ff",
+        minHeight: "100vh",
+        fontFamily:
+          "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        color: "#0d1117",
+      }}
+    >
+      {/* ── Navbar ── */}
+      <div style={{ display: "flex", justifyContent: "center", padding: "20px 24px 0" }}>
+        <nav
+          style={{
+            background: "#fff",
+            borderRadius: 999,
+            boxShadow: "0 2px 20px rgba(0,0,0,0.08)",
+            padding: "10px 20px",
+            display: "flex",
+            alignItems: "center",
+            gap: 32,
+            maxWidth: 900,
+            width: "100%",
+          }}
+        >
+          {/* Logo */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 800, fontSize: 16, whiteSpace: "nowrap" }}>
+            🎙️ speakforge.ai
           </div>
-        </div>
 
-        <div>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Full transcript</div>
+          {/* Links */}
+          <div style={{ display: "flex", gap: 24, flex: 1 }}>
+            {NAV_LINKS.map((l) => (
+              <span
+                key={l}
+                style={{ fontSize: 14, color: "#475569", cursor: "pointer", whiteSpace: "nowrap" }}
+              >
+                {l}
+              </span>
+            ))}
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              style={{
+                background: "transparent",
+                border: "1px solid #e2e8f0",
+                borderRadius: 999,
+                padding: "8px 18px",
+                fontSize: 14,
+                cursor: "pointer",
+                color: "#0d1117",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Sign In
+            </button>
+            <Link href="/coach">
+              <button
+                style={{
+                  background: "#3b5bdb",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 999,
+                  padding: "8px 20px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Get Started Free →
+              </button>
+            </Link>
+          </div>
+        </nav>
+      </div>
+
+      {/* ── Hero ── */}
+      <section
+        style={{
+          textAlign: "center",
+          padding: "72px 24px 60px",
+          maxWidth: 760,
+          margin: "0 auto",
+          position: "relative",
+        }}
+      >
+        {/* Floating decoration icons */}
+        {[
+          { emoji: "🎤", top: 40, left: -120, bg: "#ede9fe" },
+          { emoji: "🧍", top: 160, left: -80, bg: "#fce7f3" },
+          { emoji: "📊", top: 40, right: -120, bg: "#dcfce7" },
+          { emoji: "🔊", top: 160, right: -80, bg: "#fef9c3" },
+        ].map(({ emoji, top, left, right, bg }, i) => (
           <div
+            key={i}
             style={{
-              border: "1px solid #ddd",
-              borderRadius: 10,
-              padding: 10,
-              maxHeight: 180,
-              overflow: "auto",
-              whiteSpace: "pre-wrap"
+              position: "absolute",
+              top,
+              left,
+              right,
+              width: 52,
+              height: 52,
+              background: bg,
+              borderRadius: 14,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 24,
+              boxShadow: "0 2px 12px rgba(0,0,0,0.07)",
             }}
           >
-            {transcript || "(waiting...)"} 
+            {emoji}
+          </div>
+        ))}
+
+        {/* Badge */}
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 7,
+            background: "#fff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 999,
+            padding: "6px 16px",
+            fontSize: 13,
+            color: "#475569",
+            marginBottom: 28,
+          }}
+        >
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
+          AI-Powered Speaking Coach
+        </div>
+
+        {/* Headline */}
+        <h1
+          style={{
+            fontSize: "clamp(44px, 7vw, 72px)",
+            fontWeight: 900,
+            lineHeight: 1.08,
+            letterSpacing: "-2px",
+            margin: "0 0 24px",
+            color: "#0d1117",
+          }}
+        >
+          Speak With{" "}
+          <span style={{ color: "#3b5bdb" }}>Confidence.</span>
+        </h1>
+
+        {/* Sub with highlight chips */}
+        <p style={{ fontSize: 17, color: "#475569", lineHeight: 1.75, margin: "0 0 36px" }}>
+          <Chip color="#bbf7d0" text="Real-time" /> coaching that{" "}
+          <Chip color="#bbf7d0" text="tracks your speech" />, analyzes your body
+          language, and gives you{" "}
+          <Chip color="#bbf7d0" text="instant feedback" />.
+        </p>
+
+        {/* CTA */}
+        <Link href="/coach">
+          <button
+            style={{
+              background: "#3b5bdb",
+              color: "#fff",
+              border: "none",
+              borderRadius: 999,
+              padding: "18px 48px",
+              fontSize: 18,
+              fontWeight: 700,
+              cursor: "pointer",
+              boxShadow: "0 4px 24px rgba(59,91,219,0.35)",
+              marginBottom: 16,
+            }}
+          >
+            Start Coaching Free →
+          </button>
+        </Link>
+
+        <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 48 }}>
+          No sign-up required &nbsp;·&nbsp; Works best in Chrome
+        </div>
+
+        {/* Trust badges */}
+        <div style={{ display: "flex", justifyContent: "center", gap: 28, marginBottom: 56, flexWrap: "wrap" }}>
+          {["✅ No credit card", "✅ Camera & mic only", "▶ See How It Works"].map((t) => (
+            <span key={t} style={{ fontSize: 13, color: "#64748b" }}>{t}</span>
+          ))}
+        </div>
+
+        {/* Stat cards */}
+        <div style={{ display: "flex", justifyContent: "center", gap: 16, flexWrap: "wrap" }}>
+          {STATS.map(({ icon, label, sub }) => (
+            <div
+              key={label}
+              style={{
+                background: "#fff",
+                borderRadius: 16,
+                padding: "16px 28px",
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                boxShadow: "0 1px 8px rgba(0,0,0,0.06)",
+                border: "1px solid #f1f5f9",
+              }}
+            >
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  background: "#ede9fe",
+                  borderRadius: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 20,
+                }}
+              >
+                {icon}
+              </div>
+              <div style={{ textAlign: "left" }}>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{label}</div>
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>{sub}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── What is SpeakForge? ── */}
+      <section style={{ background: "#fff", padding: "80px 24px" }}>
+        <div style={{ maxWidth: 1000, margin: "0 auto" }}>
+          <h2
+            style={{
+              textAlign: "center",
+              fontSize: "clamp(32px, 5vw, 52px)",
+              fontWeight: 900,
+              letterSpacing: "-1.5px",
+              marginBottom: 14,
+            }}
+          >
+            What is{" "}
+            <span style={{ color: "#3b5bdb" }}>SpeakForge?</span>
+          </h2>
+          <p
+            style={{
+              textAlign: "center",
+              fontSize: 16,
+              color: "#64748b",
+              maxWidth: 560,
+              margin: "0 auto 64px",
+              lineHeight: 1.7,
+            }}
+          >
+            SpeakForge is a real-time AI coach that listens to your voice,
+            watches your posture, and gives you live feedback — all in your browser.
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 48, alignItems: "start" }}>
+            {/* Left: feature list */}
+            <div>
+              <p
+                style={{
+                  fontWeight: 800,
+                  fontSize: 20,
+                  marginBottom: 28,
+                  color: "#0d1117",
+                }}
+              >
+                Stop presenting without knowing how you look
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {FEATURES_LEFT.map(({ icon, title, desc }) => (
+                  <div
+                    key={title}
+                    style={{
+                      display: "flex",
+                      gap: 16,
+                      background: "#f8fafc",
+                      borderRadius: 14,
+                      padding: "18px 20px",
+                      border: "1px solid #f1f5f9",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 38,
+                        height: 38,
+                        background: "#ede9fe",
+                        borderRadius: 10,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 18,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {icon}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{title}</div>
+                      <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.5 }}>{desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Right: 2x2 cards */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              {FEATURES_RIGHT.map(({ icon, color, iconColor, title, desc }) => (
+                <div
+                  key={title}
+                  style={{
+                    background: "#fff",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: 16,
+                    padding: "22px 18px",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 42,
+                      height: 42,
+                      background: color,
+                      borderRadius: 12,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 22,
+                      marginBottom: 14,
+                      color: iconColor,
+                    }}
+                  >
+                    {icon}
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>{title}</div>
+                  <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.55 }}>{desc}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      </section>
+
+      {/* ── How It Works ── */}
+      <section style={{ padding: "80px 24px", background: "#f4f6ff" }}>
+        <h2
+          style={{
+            textAlign: "center",
+            fontSize: "clamp(32px, 5vw, 52px)",
+            fontWeight: 900,
+            letterSpacing: "-1.5px",
+            marginBottom: 12,
+          }}
+        >
+          How It{" "}
+          <span style={{ color: "#3b5bdb" }}>Works</span>
+        </h2>
+        <p style={{ textAlign: "center", color: "#64748b", fontSize: 15, marginBottom: 56 }}>
+          From browser to better speaker in 3 steps
+        </p>
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: 24,
+            maxWidth: 900,
+            margin: "0 auto",
+            flexWrap: "wrap",
+          }}
+        >
+          {[
+            { step: "01", title: "Allow Camera & Mic", desc: "Grant permission once — no downloads, no accounts.", icon: "📷" },
+            { step: "02", title: "Start Speaking", desc: "SpeakForge immediately starts analysing your voice and body.", icon: "🎙️" },
+            { step: "03", title: "Read Your Live Score", desc: "Watch WPM, posture, gesture energy, and fillers update in real time.", icon: "📊" },
+          ].map(({ step, title, desc, icon }) => (
+            <div
+              key={step}
+              style={{
+                background: "#fff",
+                border: "1px solid #e2e8f0",
+                borderRadius: 20,
+                padding: "32px 28px",
+                flex: "1 1 240px",
+                maxWidth: 280,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#3b5bdb" }}>Step {step}</span>
+              </div>
+              <div style={{ fontSize: 32, marginBottom: 14 }}>{icon}</div>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>{title}</div>
+              <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.6 }}>{desc}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Final CTA */}
+        <div style={{ textAlign: "center", marginTop: 64 }}>
+          <Link href="/coach">
+            <button
+              style={{
+                background: "#3b5bdb",
+                color: "#fff",
+                border: "none",
+                borderRadius: 999,
+                padding: "18px 52px",
+                fontSize: 17,
+                fontWeight: 700,
+                cursor: "pointer",
+                boxShadow: "0 4px 24px rgba(59,91,219,0.35)",
+              }}
+            >
+              Launch Coach →
+            </button>
+          </Link>
+        </div>
+      </section>
+
+      {/* ── Footer ── */}
+      <footer
+        style={{
+          textAlign: "center",
+          padding: "28px 24px",
+          fontSize: 13,
+          color: "#94a3b8",
+          borderTop: "1px solid #e2e8f0",
+          background: "#fff",
+        }}
+      >
+        © 2025 SpeakForge · Built at HackTCNJ 2026
+      </footer>
     </div>
+  );
+}
+
+function Chip({ text, color }: { text: string; color: string }) {
+  return (
+    <span
+      style={{
+        background: color,
+        borderRadius: 6,
+        padding: "1px 8px",
+        fontWeight: 600,
+        color: "#0d1117",
+        fontSize: "0.95em",
+      }}
+    >
+      {text}
+    </span>
   );
 }
