@@ -95,6 +95,7 @@ export default function CoachPage() {
   const [fullSpeech, setFullSpeech] = useState("");
   const [feedback, setFeedback] = useState<GeminiFeedback | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
   // Stable refs for interval (avoid stale closures)
   const metricsRef = useRef({ wpm: 0, fillerCount: 0, gestureEnergy: 0, postureScore: 0, volumeLevel: 0, energyScore: 0, variationScore: 0 });
@@ -112,36 +113,35 @@ export default function CoachPage() {
   useEffect(() => { startedAtRef.current = startedAt; }, [startedAt]);
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
 
-  // ── Gemini interval ────────────────────────────────────────────────────────
-  useEffect(() => {
-    const call = async () => {
-      if (!isLiveRef.current) return;
-      setFeedbackLoading(true);
-      try {
-        const res = await fetch("/api/gemini", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            metrics: metricsRef.current,
-            liveTranscript: transcriptRef.current,
-            fullSpeech: fullSpeechRef.current,
-          }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        if (data.feedback && data.focus) setFeedback(data as GeminiFeedback);
-      } catch (e) {
-        console.error("Gemini error:", e);
-      } finally {
-        setFeedbackLoading(false);
+  // ── Ask Coach (on-demand) ──────────────────────────────────────────────────
+  const askCoach = async () => {
+    if (feedbackLoading) return;
+    setFeedbackLoading(true);
+    setFeedbackError(null);
+    try {
+      const res = await fetch("/api/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metrics: metricsRef.current,
+          liveTranscript: transcriptRef.current,
+          fullSpeech: fullSpeechRef.current,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.feedback && data.focus) {
+        setFeedback(data as GeminiFeedback);
+      } else {
+        setFeedbackError("Unexpected response from coach.");
       }
-    };
-
-    // First call after 5 s (gives camera time to start), then every 8 s
-    const initial = setTimeout(call, 5000);
-    const interval = setInterval(call, 8000);
-    return () => { clearTimeout(initial); clearInterval(interval); };
-  }, []);
+    } catch (e) {
+      console.error("Gemini error:", e);
+      setFeedbackError("Coach unavailable — try again.");
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
 
   // ── Camera + audio ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -414,11 +414,30 @@ export default function CoachPage() {
                     {FOCUS_ICONS[feedback.focus]} {feedback.focus}
                   </span>
                 )}
-                <span style={{ marginLeft: "auto", fontSize: 11, color: "#cbd5e1" }}>
-                  {feedbackLoading ? "Analyzing…" : "every 8s"}
-                </span>
+                <button
+                  onClick={askCoach}
+                  disabled={feedbackLoading}
+                  style={{
+                    marginLeft: "auto",
+                    background: feedbackLoading ? "#f1f5f9" : "#3b5bdb",
+                    color: feedbackLoading ? "#94a3b8" : "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "5px 12px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: feedbackLoading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {feedbackLoading ? "Analyzing…" : "Ask Coach"}
+                </button>
               </div>
 
+              {feedbackError && (
+                <p style={{ margin: "0 0 8px", fontSize: 12, color: "#dc2626", background: "#fee2e2", borderRadius: 8, padding: "6px 10px" }}>
+                  ⚠ {feedbackError}
+                </p>
+              )}
               <p style={{
                 margin: 0, fontSize: 20, fontWeight: 800, lineHeight: 1.3,
                 color: fs ? fs.accent : "#94a3b8",
@@ -427,7 +446,7 @@ export default function CoachPage() {
                 {feedback
                   ? feedback.feedback
                   : status === "live"
-                  ? "First tip in 5 seconds…"
+                  ? "Press Ask Coach for feedback"
                   : "Waiting for camera…"}
               </p>
 

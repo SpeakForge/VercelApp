@@ -1,68 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const CLAUDE_API_KEY = "REMOVED";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "REMOVED";
 
 export async function POST(req: NextRequest) {
+  if (!GEMINI_API_KEY) {
+    return NextResponse.json({ error: "No API key configured" }, { status: 503 });
+  }
+
   try {
     const { metrics, liveTranscript, fullSpeech } = await req.json();
 
-    const prompt = `Return ONLY valid JSON — no markdown, no code fences, no extra text.
+    const prompt = `You are a live speaking coach. Reply with JSON only.
+feedback: max 6 words, punchy action verb (e.g. "Slow down, pause between ideas")
+focus: the single biggest issue
+reason: max 5 words explaining why
 
-Schema:
-{
-  "feedback": "<one actionable tip, max 12 words>",
-  "focus": "pace" | "fillers" | "energy" | "variation" | "gestures" | "posture" | "content",
-  "reason": "<one sentence why>"
-}
+Metrics: ${JSON.stringify(metrics)}
+Transcript: ${liveTranscript || "(none)"}
+Planned: ${fullSpeech || "(none)"}`;
 
-Rules:
-- feedback must be a single, short, actionable coaching tip.
-- If the live transcript is missing key topics from the planned speech, set focus to "content".
-- Pick the single most important thing to fix right now.
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.3,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "object",
+              properties: {
+                feedback: { type: "string" },
+                focus: { type: "string", enum: ["pace","fillers","energy","variation","gestures","posture","content"] },
+                reason: { type: "string" },
+              },
+              required: ["feedback", "focus", "reason"],
+            },
+          },
+        }),
+      }
+    );
 
-Current metrics:
-${JSON.stringify(metrics, null, 2)}
-
-What has been said so far:
-${liveTranscript || "(nothing yet)"}
-
-Full planned speech to cover:
-${fullSpeech || "(none provided)"}`;
-
-    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": CLAUDE_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 200,
-        temperature: 0.3,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-
-    if (!claudeRes.ok) {
-      const err = await claudeRes.text();
-      console.error("Claude API error:", err);
-      return NextResponse.json({ error: "Claude API error", details: err }, { status: 502 });
+    if (!geminiRes.ok) {
+      const err = await geminiRes.text();
+      console.error("Gemini API error:", err);
+      return NextResponse.json({ error: "Gemini API error", details: err }, { status: 502 });
     }
 
-    const data = await claudeRes.json();
-    const raw: string = data.content?.[0]?.text ?? "";
+    const data = await geminiRes.json();
+    const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 
-    // Strip any accidental markdown fences
-    const match = raw.match(/\{[\s\S]*?\}/);
-    if (!match) {
-      console.error("No JSON found in Claude response:", raw);
-      return NextResponse.json({ error: "No JSON in Claude response", raw }, { status: 500 });
+    try {
+      return NextResponse.json(JSON.parse(raw));
+    } catch {
+      console.error("Failed to parse Gemini JSON:", raw);
+      return NextResponse.json({ error: "Invalid JSON from Gemini", raw }, { status: 500 });
     }
-
-    return NextResponse.json(JSON.parse(match[0]));
   } catch (err) {
-    console.error("Claude route error:", err);
+    console.error("Gemini route error:", err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }
