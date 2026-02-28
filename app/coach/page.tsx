@@ -1,16 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
 
 // ── Types & constants ────────────────────────────────────────────────────────
 
 type FocusType = "pace" | "fillers" | "energy" | "variation" | "gestures" | "posture" | "content";
 
-interface GeminiFeedback {
-  feedback: string;
-  focus: FocusType;
-  reason: string;
+interface GeminiFeedback { feedback: string; focus: FocusType; reason: string; }
+
+interface SummaryResult { overview: string; score: number; strengths: string[]; improvements: string[]; }
+
+interface MetricsSnapshot {
+  wpm: number; fillerCount: number; gestureEnergy: number;
+  postureScore: number; volumeLevel: number; energyScore: number; variationScore: number;
 }
 
 const FOCUS_STYLES: Record<FocusType, { bg: string; accent: string; pill: string }> = {
@@ -47,6 +51,8 @@ function estimateWpm(words: number, seconds: number) {
 
 function clamp01(x: number) { return Math.max(0, Math.min(1, x)); }
 
+function avg(arr: number[]) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
+
 function ScoreBar({ value, color = "#6d28d9" }: { value: number; color?: string }) {
   return (
     <div style={{ height: 6, background: "#f1f5f9", borderRadius: 99, overflow: "hidden", marginTop: 4 }}>
@@ -58,6 +64,8 @@ function ScoreBar({ value, color = "#6d28d9" }: { value: number; color?: string 
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function CoachPage() {
+  const router = useRouter();
+
   // Camera / pose refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const poseRef = useRef<PoseLandmarker | null>(null);
@@ -72,6 +80,10 @@ export default function CoachPage() {
   const volumeHistoryRef = useRef<number[]>([]);
   const audioRafRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Metrics history (snapshot every 5s while recording)
+  const metricsHistoryRef = useRef<MetricsSnapshot[]>([]);
+  const sessionStartRef = useRef<number | null>(null);
 
   // State
   const [status, setStatus] = useState<"loading" | "live" | "error">("loading");
@@ -97,8 +109,17 @@ export default function CoachPage() {
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
-  // Stable refs for interval (avoid stale closures)
-  const metricsRef = useRef({ wpm: 0, fillerCount: 0, gestureEnergy: 0, postureScore: 0, volumeLevel: 0, energyScore: 0, variationScore: 0 });
+  // Summary state
+  const [showSummary, setShowSummary] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryResult, setSummaryResult] = useState<SummaryResult | null>(null);
+  const [summarySnapshot, setSummarySnapshot] = useState<{
+    transcript: string; durationSecs: number; wordCount: number;
+    fillerCount: number; avgMetrics: MetricsSnapshot;
+  } | null>(null);
+
+  // Stable refs to avoid stale closures
+  const metricsRef = useRef<MetricsSnapshot>({ wpm: 0, fillerCount: 0, gestureEnergy: 0, postureScore: 0, volumeLevel: 0, energyScore: 0, variationScore: 0 });
   const transcriptRef = useRef("");
   const fullSpeechRef = useRef("");
   const isLiveRef = useRef(false);
@@ -112,6 +133,15 @@ export default function CoachPage() {
   useEffect(() => { isLiveRef.current = status === "live"; }, [status]);
   useEffect(() => { startedAtRef.current = startedAt; }, [startedAt]);
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
+
+  // Collect metrics snapshot every 5s while recording
+  useEffect(() => {
+    if (!isRecording) return;
+    const id = setInterval(() => {
+      metricsHistoryRef.current.push({ ...metricsRef.current });
+    }, 5000);
+    return () => clearInterval(id);
+  }, [isRecording]);
 
   // ── Ask Coach (on-demand) ──────────────────────────────────────────────────
   const askCoach = async () => {
@@ -130,11 +160,8 @@ export default function CoachPage() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (data.feedback && data.focus) {
-        setFeedback(data as GeminiFeedback);
-      } else {
-        setFeedbackError("Unexpected response from coach.");
-      }
+      if (data.feedback && data.focus) setFeedback(data as GeminiFeedback);
+      else setFeedbackError("Unexpected response from coach.");
     } catch (e) {
       console.error("Gemini error:", e);
       setFeedbackError("Coach unavailable — try again.");
@@ -159,9 +186,7 @@ export default function CoachPage() {
         src.connect(analyser);
         audioDataRef.current = new Uint8Array(analyser.fftSize);
         setStatus("live");
-      } catch {
-        setStatus("error");
-      }
+      } catch { setStatus("error"); }
     })();
     return () => {
       if (audioRafRef.current) cancelAnimationFrame(audioRafRef.current);
@@ -177,15 +202,21 @@ export default function CoachPage() {
         analyser.getByteTimeDomainData(data);
         let sumSq = 0;
         for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sumSq += v * v; }
-        const level = Math.min(1, Math.sqrt(sumSq / data.length) * 2.5);
+        // Increased sensitivity: ×8 so normal speech hits 0.3–0.6, yelling 0.8+
+        const level = clamp01(Math.sqrt(sumSq / data.length) * 8);
         setVolumeLevel(level);
-        setEnergyScore(p => p * 0.85 + level * 0.15);
+        // Faster EMA so energy responds quickly
+        setEnergyScore(p => clamp01(p * 0.6 + level * 0.4));
+
         const hist = volumeHistoryRef.current;
         hist.push(level);
-        if (hist.length > 60) hist.shift();
-        const mean = hist.reduce((a, b) => a + b, 0) / hist.length;
-        const std = Math.sqrt(hist.reduce((a, b) => a + (b - mean) ** 2, 0) / hist.length);
-        setVariationScore(clamp01(std * 6));
+        if (hist.length > 120) hist.shift();
+        // Variation = dynamic range of recent 20 frames (max−min), scaled up
+        if (hist.length >= 10) {
+          const recent = hist.slice(-20);
+          const hi = Math.max(...recent), lo = Math.min(...recent);
+          setVariationScore(clamp01((hi - lo) * 4));
+        }
       }
       audioRafRef.current = requestAnimationFrame(tick);
     };
@@ -216,7 +247,6 @@ export default function CoachPage() {
       setRecentTranscript(interim);
       if (!startedAtRef.current) setStartedAt(Date.now());
     };
-    // Auto-restart if recording is still active (browser ends session after silence)
     rec.onend = () => { if (isRecordingRef.current) rec.start(); };
     recRef.current = rec;
     return () => { rec.stop(); recRef.current = null; };
@@ -225,28 +255,65 @@ export default function CoachPage() {
   // ── Recording handlers ────────────────────────────────────────────────────
   const startRecording = () => {
     if (!recRef.current || isRecordingRef.current) return;
+    metricsHistoryRef.current = [];
+    sessionStartRef.current = Date.now();
     setIsRecording(true);
     recRef.current.start();
-
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
     if (!recRef.current || !isRecordingRef.current) return;
     setIsRecording(false);
-    isRecordingRef.current = false; // set immediately so onend won't restart
+    isRecordingRef.current = false;
     recRef.current.stop();
+
+    // Capture session snapshot
+    const durationSecs = sessionStartRef.current ? (Date.now() - sessionStartRef.current) / 1000 : 0;
+    const hist = metricsHistoryRef.current;
+    const snap = {
+      transcript: transcriptRef.current,
+      durationSecs,
+      wordCount: transcriptRef.current.split(/\s+/).filter(Boolean).length,
+      fillerCount: countFillers(transcriptRef.current),
+      avgMetrics: {
+        wpm: hist.length ? Math.round(avg(hist.map(h => h.wpm))) : metricsRef.current.wpm,
+        fillerCount: hist.length ? Math.round(avg(hist.map(h => h.fillerCount))) : metricsRef.current.fillerCount,
+        gestureEnergy: hist.length ? avg(hist.map(h => h.gestureEnergy)) : metricsRef.current.gestureEnergy,
+        postureScore: hist.length ? avg(hist.map(h => h.postureScore)) : metricsRef.current.postureScore,
+        volumeLevel: hist.length ? avg(hist.map(h => h.volumeLevel)) : metricsRef.current.volumeLevel,
+        energyScore: hist.length ? avg(hist.map(h => h.energyScore)) : metricsRef.current.energyScore,
+        variationScore: hist.length ? avg(hist.map(h => h.variationScore)) : metricsRef.current.variationScore,
+      },
+    };
+    setSummarySnapshot(snap);
+    setShowSummary(true);
+
+    // Call summary AI
+    setSummaryLoading(true);
+    try {
+      const res = await fetch("/api/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...snap, fullSpeech: fullSpeechRef.current }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSummaryResult(data);
+      }
+    } catch (e) { console.error("Summary error:", e); }
+    finally { setSummaryLoading(false); }
   };
 
   const clearTranscript = () => {
-    setTranscript("");
-    setRecentTranscript("");
-    setStartedAt(null);
-    setWpm(0);
-    setFillerCount(0);
-    // Stop & restart recognition to flush its internal results buffer
-    if (isRecordingRef.current && recRef.current) {
-      recRef.current.stop(); // onend will auto-restart since isRecordingRef is still true
-    }
+    setTranscript(""); setRecentTranscript(""); setStartedAt(null); setWpm(0); setFillerCount(0);
+    if (isRecordingRef.current && recRef.current) recRef.current.stop();
+  };
+
+  const restartSession = () => {
+    setShowSummary(false); setSummaryResult(null); setSummarySnapshot(null);
+    setTranscript(""); setRecentTranscript(""); setStartedAt(null);
+    setWpm(0); setFillerCount(0); setFeedback(null); setFeedbackError(null);
+    metricsHistoryRef.current = []; sessionStartRef.current = null;
   };
 
   // ── WPM + filler counter ──────────────────────────────────────────────────
@@ -278,7 +345,6 @@ export default function CoachPage() {
     const loop = () => {
       const video = videoRef.current, pose = poseRef.current;
       const now = performance.now();
-      // Throttle to ~15 fps to avoid overwhelming MediaPipe
       if (video && pose && video.readyState >= 2 && now - lastPoseTimeRef.current >= 66) {
         lastPoseTimeRef.current = now;
         const t = now, res = pose.detectForVideo(video, t), lm = res.landmarks?.[0];
@@ -304,7 +370,125 @@ export default function CoachPage() {
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, []);
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render: Summary page ──────────────────────────────────────────────────
+  if (showSummary && summarySnapshot) {
+    const s = summarySnapshot;
+    const m = s.avgMetrics;
+    const mins = Math.floor(s.durationSecs / 60), secs = Math.round(s.durationSecs % 60);
+
+    return (
+      <div style={{ minHeight: "100vh", background: "#f8fafc", padding: "24px 20px" }}>
+        <div style={{ maxWidth: 800, margin: "0 auto" }}>
+
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.5px" }}>🎙️ SpeakForge</span>
+              <span style={{ fontSize: 12, color: "#94a3b8" }}>Session Summary</span>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => router.push("/")} style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "8px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                ← Back
+              </button>
+              <button onClick={restartSession} style={{ background: "#3b5bdb", color: "#fff", border: "none", borderRadius: 10, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                ↺ New Session
+              </button>
+            </div>
+          </div>
+
+          {/* Score banner */}
+          {summaryLoading ? (
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "28px", textAlign: "center", marginBottom: 16, color: "#94a3b8", fontSize: 14 }}>
+              ✨ Generating your personalized summary…
+            </div>
+          ) : summaryResult && (
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "24px", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>AI Overview</p>
+                  <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: "#0d1117" }}>{summaryResult.overview}</p>
+                </div>
+                <div style={{ textAlign: "center", flexShrink: 0 }}>
+                  <div style={{ fontSize: 48, fontWeight: 900, color: summaryResult.score >= 70 ? "#15803d" : summaryResult.score >= 45 ? "#b45309" : "#dc2626", letterSpacing: "-2px" }}>
+                    {summaryResult.score}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>/ 100</div>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 16 }}>
+                <div style={{ background: "#f0fdf4", borderRadius: 10, padding: "12px 14px" }}>
+                  <p style={{ margin: "0 0 6px", fontSize: 11, fontWeight: 700, color: "#15803d" }}>✅ Strengths</p>
+                  {summaryResult.strengths.map((s, i) => <p key={i} style={{ margin: "2px 0", fontSize: 13, color: "#166534" }}>• {s}</p>)}
+                </div>
+                <div style={{ background: "#fff7ed", borderRadius: 10, padding: "12px 14px" }}>
+                  <p style={{ margin: "0 0 6px", fontSize: 11, fontWeight: 700, color: "#c2410c" }}>🎯 Improve</p>
+                  {summaryResult.improvements.map((s, i) => <p key={i} style={{ margin: "2px 0", fontSize: 13, color: "#9a3412" }}>• {s}</p>)}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Session stats */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
+            {[
+              { label: "Duration", value: `${mins}:${String(secs).padStart(2, "0")}` },
+              { label: "Words", value: String(s.wordCount) },
+              { label: "Avg WPM", value: String(m.wpm) },
+              { label: "Fillers", value: String(s.fillerCount) },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px", textAlign: "center" }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "#0d1117" }}>{value}</div>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Avg metrics */}
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "20px", marginBottom: 16 }}>
+            <p style={{ margin: "0 0 14px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>Average Metrics</p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 24px" }}>
+              {[
+                { label: "Gesture Energy", value: m.gestureEnergy, color: "#10b981" },
+                { label: "Posture", value: m.postureScore, color: "#6366f1" },
+                { label: "Energy", value: m.energyScore, color: "#8b5cf6" },
+                { label: "Variation", value: m.variationScore, color: "#06b6d4" },
+                { label: "Volume", value: m.volumeLevel, color: "#ec4899" },
+              ].map(({ label, value, color }) => (
+                <div key={label}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                    <span style={{ color: "#64748b" }}>{label}</span>
+                    <span style={{ fontWeight: 700 }}>{value.toFixed(2)}</span>
+                  </div>
+                  <ScoreBar value={value} color={color} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Transcript */}
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "20px", marginBottom: 24 }}>
+            <p style={{ margin: "0 0 10px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>Full Transcript</p>
+            <div style={{ fontSize: 14, color: s.transcript ? "#0d1117" : "#cbd5e1", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
+              {s.transcript || "(no transcript recorded)"}
+            </div>
+          </div>
+
+          {/* Bottom buttons */}
+          <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+            <button onClick={() => router.push("/")} style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "12px 28px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+              ← Back to Home
+            </button>
+            <button onClick={restartSession} style={{ background: "#3b5bdb", color: "#fff", border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+              ↺ Start New Session
+            </button>
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: Live coach ────────────────────────────────────────────────────
   const fs = feedback ? FOCUS_STYLES[feedback.focus] : null;
 
   return (
@@ -314,20 +498,19 @@ export default function CoachPage() {
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button onClick={() => router.push("/")} style={{ background: "none", border: "none", fontSize: 13, color: "#94a3b8", cursor: "pointer", padding: 0 }}>← Home</button>
             <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.5px" }}>🎙️ SpeakForge</span>
             <span style={{ fontSize: 12, color: "#94a3b8" }}>Live Coach</span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{
-              display: "flex", alignItems: "center", gap: 5,
-              padding: "5px 14px", borderRadius: 999, fontSize: 12, fontWeight: 600,
-              background: status === "live" ? "#dcfce7" : status === "error" ? "#fee2e2" : "#f1f5f9",
-              color: status === "live" ? "#15803d" : status === "error" ? "#dc2626" : "#64748b",
-            }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
-              {status === "live" ? "Live" : status === "error" ? "Permission denied" : "Starting..."}
-            </span>
-          </div>
+          <span style={{
+            display: "flex", alignItems: "center", gap: 5,
+            padding: "5px 14px", borderRadius: 999, fontSize: 12, fontWeight: 600,
+            background: status === "live" ? "#dcfce7" : status === "error" ? "#fee2e2" : "#f1f5f9",
+            color: status === "live" ? "#15803d" : status === "error" ? "#dc2626" : "#64748b",
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
+            {status === "live" ? "Live" : status === "error" ? "Permission denied" : "Starting..."}
+          </span>
         </div>
 
         {/* Planned speech */}
@@ -340,15 +523,11 @@ export default function CoachPage() {
             value={fullSpeech}
             onChange={e => setFullSpeech(e.target.value)}
             placeholder="Paste your full script here before presenting..."
-            style={{
-              width: "100%", height: 64, borderRadius: 8, border: "1px solid #e2e8f0",
-              padding: "8px 12px", fontSize: 13, resize: "vertical",
-              background: "#f8fafc", boxSizing: "border-box", color: "#0d1117",
-            }}
+            style={{ width: "100%", height: 64, borderRadius: 8, border: "1px solid #e2e8f0", padding: "8px 12px", fontSize: 13, resize: "vertical", background: "#f8fafc", boxSizing: "border-box", color: "#0d1117" }}
           />
         </div>
 
-        {/* Main grid: video | right panel */}
+        {/* Main grid */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 16, alignItems: "start" }}>
 
           {/* Video + controls */}
@@ -365,31 +544,15 @@ export default function CoachPage() {
                   background: isRecording ? "#fee2e2" : "#dcfce7",
                   color: isRecording ? "#dc2626" : "#15803d",
                   border: `1.5px solid ${isRecording ? "#fca5a5" : "#86efac"}`,
-                  borderRadius: 10,
-                  padding: "10px 0",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 6,
+                  borderRadius: 10, padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                 }}
               >
-                {isRecording ? "⏹ Stop Recording" : "⏺ Start Recording"}
+                {isRecording ? "⏹ Stop & Summarize" : "⏺ Start Recording"}
               </button>
               <button
                 onClick={clearTranscript}
-                style={{
-                  background: "#f1f5f9",
-                  color: "#64748b",
-                  border: "1.5px solid #e2e8f0",
-                  borderRadius: 10,
-                  padding: "10px 18px",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
+                style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
               >
                 Clear
               </button>
@@ -406,9 +569,7 @@ export default function CoachPage() {
               transition: "background 0.5s, border-color 0.5s", minHeight: 120,
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>
-                  AI Coach
-                </span>
+                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>AI Coach</span>
                 {feedback && fs && (
                   <span style={{ background: fs.pill, color: fs.accent, borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>
                     {FOCUS_ICONS[feedback.focus]} {feedback.focus}
@@ -421,12 +582,8 @@ export default function CoachPage() {
                     marginLeft: "auto",
                     background: feedbackLoading ? "#f1f5f9" : "#3b5bdb",
                     color: feedbackLoading ? "#94a3b8" : "#fff",
-                    border: "none",
-                    borderRadius: 8,
-                    padding: "5px 12px",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: feedbackLoading ? "not-allowed" : "pointer",
+                    border: "none", borderRadius: 8, padding: "5px 12px",
+                    fontSize: 12, fontWeight: 700, cursor: feedbackLoading ? "not-allowed" : "pointer",
                   }}
                 >
                   {feedbackLoading ? "Analyzing…" : "Ask Coach"}
@@ -438,39 +595,26 @@ export default function CoachPage() {
                   ⚠ {feedbackError}
                 </p>
               )}
-              <p style={{
-                margin: 0, fontSize: 20, fontWeight: 800, lineHeight: 1.3,
-                color: fs ? fs.accent : "#94a3b8",
-                transition: "color 0.5s",
-              }}>
-                {feedback
-                  ? feedback.feedback
-                  : status === "live"
-                  ? "Press Ask Coach for feedback"
-                  : "Waiting for camera…"}
+              <p style={{ margin: 0, fontSize: 20, fontWeight: 800, lineHeight: 1.3, color: fs ? fs.accent : "#94a3b8", transition: "color 0.5s" }}>
+                {feedback ? feedback.feedback : status === "live" ? "Press Ask Coach for feedback" : "Waiting for camera…"}
               </p>
-
               {feedback?.reason && (
-                <p style={{ margin: "10px 0 0", fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
-                  {feedback.reason}
-                </p>
+                <p style={{ margin: "10px 0 0", fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>{feedback.reason}</p>
               )}
             </div>
 
             {/* Metrics */}
             <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "16px 20px" }}>
-              <p style={{ margin: "0 0 14px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>
-                Metrics
-              </p>
+              <p style={{ margin: "0 0 14px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>Metrics</p>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 20px" }}>
                 {[
-                  { label: "WPM", value: wpm, display: String(wpm), bar: clamp01(wpm / 180), color: "#3b82f6" },
-                  { label: "Fillers", value: fillerCount, display: String(fillerCount), bar: clamp01(fillerCount / 10), color: "#f59e0b" },
-                  { label: "Gesture", value: gestureEnergy, display: gestureEnergy.toFixed(2), bar: gestureEnergy, color: "#10b981" },
-                  { label: "Posture", value: postureScore, display: postureScore.toFixed(2), bar: postureScore, color: "#6366f1" },
-                  { label: "Energy", value: energyScore, display: energyScore.toFixed(2), bar: energyScore, color: "#8b5cf6" },
-                  { label: "Variation", value: variationScore, display: variationScore.toFixed(2), bar: variationScore, color: "#06b6d4" },
-                  { label: "Volume", value: volumeLevel, display: volumeLevel.toFixed(2), bar: volumeLevel, color: "#ec4899" },
+                  { label: "WPM", display: String(wpm), bar: clamp01(wpm / 180), color: "#3b82f6" },
+                  { label: "Fillers", display: String(fillerCount), bar: clamp01(fillerCount / 10), color: "#f59e0b" },
+                  { label: "Gesture", display: gestureEnergy.toFixed(2), bar: gestureEnergy, color: "#10b981" },
+                  { label: "Posture", display: postureScore.toFixed(2), bar: postureScore, color: "#6366f1" },
+                  { label: "Energy", display: energyScore.toFixed(2), bar: energyScore, color: "#8b5cf6" },
+                  { label: "Variation", display: variationScore.toFixed(2), bar: variationScore, color: "#06b6d4" },
+                  { label: "Volume", display: volumeLevel.toFixed(2), bar: volumeLevel, color: "#ec4899" },
                 ].map(({ label, display, bar, color }) => (
                   <div key={label}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
@@ -492,9 +636,7 @@ export default function CoachPage() {
             { label: "Full transcript", text: transcript },
           ].map(({ label, text }) => (
             <div key={label} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: "14px 16px" }}>
-              <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>
-                {label}
-              </p>
+              <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>{label}</p>
               <div style={{ fontSize: 13, color: text ? "#0d1117" : "#cbd5e1", lineHeight: 1.6, maxHeight: 120, overflow: "auto", whiteSpace: "pre-wrap" }}>
                 {text || "(waiting…)"}
               </div>
