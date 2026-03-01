@@ -139,6 +139,7 @@ export default function CoachPage() {
   const transcriptRef = useRef("");
   const recentTranscriptRef = useRef("");
   const fullSpeechRef = useRef("");
+  const feedbackRef = useRef<GeminiFeedback | null>(null);
   const isLiveRef = useRef(false);
   const startedAtRef = useRef<number | null>(null);
 
@@ -148,6 +149,7 @@ export default function CoachPage() {
   useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
   useEffect(() => { recentTranscriptRef.current = recentTranscript; }, [recentTranscript]);
   useEffect(() => { fullSpeechRef.current = fullSpeech; }, [fullSpeech]);
+  useEffect(() => { feedbackRef.current = feedback; }, [feedback]);
   useEffect(() => { isLiveRef.current = status === "live"; }, [status]);
   useEffect(() => { startedAtRef.current = startedAt; }, [startedAt]);
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
@@ -269,9 +271,19 @@ export default function CoachPage() {
       const last = event.results.length - 1;
       if (last >= 0 && !event.results[last].isFinal)
         interim = (event.results[last][0]?.transcript || "").trim();
+      // Update refs immediately (before render) so WPM interval never reads stale data
+      transcriptRef.current = finalFull.trim();
+      recentTranscriptRef.current = interim;
       setTranscript(finalFull.trim());
       setRecentTranscript(interim);
       if (!startedAtRef.current) setStartedAt(Date.now());
+      // Instant WPM on every speech event — no 1-second lag
+      if (startedAtRef.current) {
+        const secs = (Date.now() - startedAtRef.current) / 1000;
+        const combined = (finalFull.trim() + " " + interim).trim();
+        setWpm(estimateWpm(combined.split(/\s+/).filter(Boolean).length, secs));
+        setFillerCount(countFillers(finalFull.trim()));
+      }
     };
     rec.onend = () => { if (isRecordingRef.current) rec.start(); };
     recRef.current = rec;
@@ -325,6 +337,22 @@ export default function CoachPage() {
       if (res.ok) {
         const data = await res.json();
         setSummaryResult(data);
+
+        // Save full session to DB (fire-and-forget)
+        fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            durationSecs: snap.durationSecs,
+            wordCount: snap.wordCount,
+            fillerCount: snap.fillerCount,
+            transcript: snap.transcript,
+            plannedSpeech: fullSpeechRef.current,
+            avgMetrics: snap.avgMetrics,
+            summary: data,
+            lastFeedback: feedbackRef.current,
+          }),
+        }).catch(e => console.error("Session save error:", e));
       }
     } catch (e) { console.error("Summary error:", e); }
     finally { setSummaryLoading(false); }
@@ -545,6 +573,9 @@ export default function CoachPage() {
               <span style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
               {status === "live" ? "Live" : status === "error" ? "Permission denied" : "Starting..."}
             </span>
+            <button onClick={() => router.push("/practice")} style={{ background: "#ede9fe", color: "#6d28d9", border: "1.5px solid #ddd6fe", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              🧠 Practice
+            </button>
             <button onClick={signOut} style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
               Sign Out
             </button>

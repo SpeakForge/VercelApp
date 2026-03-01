@@ -141,6 +141,23 @@ export default function LandingPage() {
                 >
                   Sign Out
                 </button>
+                <Link href="/practice">
+                  <button
+                    style={{
+                      background: "#ede9fe",
+                      color: "#6d28d9",
+                      border: "1px solid #ddd6fe",
+                      borderRadius: 999,
+                      padding: "8px 18px",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    🧠 Practice
+                  </button>
+                </Link>
                 <Link href="/coach">
                   <button
                     style={{
