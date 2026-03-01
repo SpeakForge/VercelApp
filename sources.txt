@@ -1,0 +1,56 @@
+SOURCES FOR SPEAKFORGE
+
+Framework & Core Stack
+Next.js Documentation
+https://nextjs.org/docs
+
+React Documentation
+https://react.dev
+
+Node.js Documentation
+https://nodejs.org/docs
+
+TypeScript Documentation
+https://www.typescriptlang.org/docs
+
+MediaPipe Pose (Tasks Vision)
+https://developers.google.com/mediapipe
+
+@mediapipe/tasks-vision npm package
+https://www.npmjs.com/package/@mediapipe/tasks-vision
+
+Web APIs
+Web Audio API (MDN)
+https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API
+
+AnalyserNode getByteTimeDomainData (MDN)
+https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode/getByteTimeDomainData
+
+Web Speech API (MDN)
+https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API
+
+SpeechRecognition Interface (MDN)
+https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition
+
+AI & APIs
+Google Gemini API Documentation
+https://ai.google.dev
+
+Gemini Generative Language API
+https://ai.google.dev/docs
+
+ElevenLabs API Documentation
+https://elevenlabs.io/docs
+
+Database & Deployment
+MongoDB Atlas Documentation
+https://www.mongodb.com/docs/atlas
+
+MongoDB Node.js Driver Documentation
+https://www.mongodb.com/docs/drivers/node
+
+Vercel Documentation
+https://vercel.com/docs
+
+GitHub Documentation
+https://docs.github.com
