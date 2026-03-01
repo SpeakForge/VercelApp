@@ -1,61 +1,76 @@
-SpeakForge is a real-time public speaking feedback tool that was built with Next.js, MediaPipe, and the Web Audio API. The live feedback is based on posture, gestures, pacing, vocal energy, and filler words, which can all be viewed as the user speaks.
+# SpeakForge
 
-Overview
+SpeakForge is a real-time AI public speaking coach built with Next.js, MediaPipe, and the Web Audio API. It tracks posture, gestures, vocal energy, pacing, and filler words while you speak — and gives live AI feedback every 5 seconds powered by Gemini.
 
-When a user opens the application and enables their camera and microphone, the system does the following:
--Tracks body posture and gesture movement using MediaPipe Pose.
--Analyzes vocal energy and variation using the Web Audio API.
--Transcribes speech in real time using the browser's Speech Recognition API.
--Calculates WPM and filler word frequency.
--Sends live metrics and transcript data to a Gemini API endpoint.
--Receives AI feedback focused on the single biggest issue.
--Displays live metrics and an overlay for feedback.
+---
 
-Features
+## Overview
 
-Video analysis
+When a user opens the application and enables their camera and microphone, the system:
+
+- Tracks body posture and gesture movement using MediaPipe Pose
+- Analyzes vocal energy and variation using the Web Audio API
+- Transcribes speech in real time using the browser's Speech Recognition API
+- Calculates WPM and filler word frequency
+- Automatically sends live metrics and transcript to Gemini every 5 seconds
+- Receives AI coaching feedback — corrective tips when something needs work, or encouraging compliments when performance is strong
+- Displays a session summary with an AI-generated score, strengths, and areas to improve after the session ends
+
+---
+
+## Features
+
+### Video Analysis
 Uses MediaPipe Pose to detect:
--Shoulder alignment
--Head position
--Wrist movement
--Gesture intensity
+- Shoulder alignment
+- Head position relative to shoulders
+- Wrist movement speed
+- Gesture intensity and smoothed energy
 
-Voice analysis
+### Voice Analysis
 Uses the Web Audio API to compute:
--Volume level
--Smoothed vocal energy
--Vocal variation (standard deviation over time)
+- Volume level (sustained RMS)
+- Smoothed vocal energy
+- Vocal variation over a rolling window
 
-Speech analysis
+### Speech Analysis
 Uses the Web Speech API to:
--Transcribe speech
--Calculate WPM
--Count filler words: "um", "uh", "like", and "you know"
+- Transcribe speech in real time (final + interim results)
+- Calculate words per minute (WPM)
+- Count filler words: "um", "uh", "like", "so", "you know"
 
-Feedback is based on metrics and their thresholds. For example:
+### Planned Speech
+Paste a script before presenting. Gemini uses it to detect missing topics and content gaps in the live transcript.
 
-High WPM: "Slow down your pace"
-Low energy: "Add more vocal energy"
-High filler count: "Reduce filler words."
-Poor posture: "Straighten your posture"
+### Live AI Feedback (Auto every 5s)
+Gemini receives metrics (excluding WPM, which is reserved for the summary) and the live transcript, then returns:
+- A short coaching tip (≤ 6 words) focused on the single biggest issue, **or** an encouraging compliment if the speaker is performing well overall
+- A focus category: `pace`, `fillers`, `energy`, `variation`, `gestures`, `posture`, `content`, or `positive`
+- A brief reason (≤ 5 words)
 
-Manual feedback trigger
-A "Get feedback now" button evaluates current performance instead of running on an automatic interval to conserve tokens.
+Feedback is skipped if a prior request is still in flight.
 
-AI feedback:
+### Session Summary
+After stopping the recording, a full summary is generated including:
+- AI overview and score (0–100)
+- Strengths and areas to improve
+- Duration, word count, average WPM, filler count
+- Average metrics across the session (gesture energy, posture, energy, variation, volume)
+- Full transcript
 
-Uses Gemini API to:
-Analyze metrics and transcript content
-Identify the single biggest speaking weakness in that moment (when the button is pressed)
-Return JSON feedback
-Generate coaching tips (under 6 words)
+Sessions can be **saved** to the database or **discarded** — saving is always manual.
 
-Tech Stack:
+---
 
-Next.js (App Router): Frontend and API routes
-React (Client Components): Real-time UI updates
-MediaPipe Tasks Vision: Pose and gesture detection
-Web Audio API: Vocal energy and variation analysis
-Web Speech API: Live speech transcription
-Gemini API (generateContent): AI-powered coaching feedback
-TypeScript: Type safety and structured development
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend & API routes | Next.js (App Router) |
+| UI | React client components |
+| Pose & gesture detection | MediaPipe Tasks Vision |
+| Vocal analysis | Web Audio API |
+| Speech transcription | Web Speech API |
+| AI coaching | Gemini 2.5 Flash (`generateContent`) |
+| Auth & sessions | Custom API routes + database |
+| Language | TypeScript |
