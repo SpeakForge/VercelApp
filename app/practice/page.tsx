@@ -118,6 +118,9 @@ export default function PracticePage() {
   const [isRecording, setIsRecording] = useState(false);
   const [camStatus, setCamStatus] = useState<"loading" | "live" | "error">("loading");
   const [user, setUser] = useState<{ name: string } | null>(null);
+  const [practiceMode, setPracticeMode] = useState<"ai" | "custom">("ai");
+  const [customText, setCustomText] = useState("");
+  const [customDone, setCustomDone] = useState(false);
 
   // Metrics state
   const [wpm, setWpm] = useState(0);
@@ -478,6 +481,25 @@ export default function PracticePage() {
     router.push("/");
   };
 
+  const startCustomRecording = () => {
+    if (!recRef.current || isRecordingRef.current) return;
+    metricsHistoryRef.current = [];
+    sessionStartRef.current = Date.now();
+    setTranscript(""); setRecentTranscript(""); setStartedAt(Date.now());
+    setWpm(0); setFillerCount(0);
+    setCustomDone(false);
+    setIsRecording(true);
+    recRef.current.start();
+  };
+
+  const stopCustomRecording = () => {
+    if (!recRef.current || !isRecordingRef.current) return;
+    setIsRecording(false);
+    isRecordingRef.current = false;
+    recRef.current.stop();
+    setCustomDone(true);
+  };
+
   // ── Derived ───────────────────────────────────────────────────────────────────
 
   const seg = practiceSession?.segments?.[currentSegmentIdx];
@@ -602,20 +624,38 @@ export default function PracticePage() {
       {/* Sub-header */}
       <div style={{ borderBottom: "1px solid var(--border-light)", padding: "16px 40px", display: "flex", alignItems: "center", gap: 14, background: "rgba(247,250,252,0.8)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", position: "relative", zIndex: 1 }}>
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 900, letterSpacing: "-0.6px", color: "var(--text)" }}>Practice <span style={{ color: "var(--gold)" }}>Mode</span></h1>
+
+        {/* Mode switcher */}
+        <div style={{ display: "flex", gap: 2, background: "var(--border-light)", borderRadius: "var(--radius-pill)", padding: 3, marginLeft: 8 }}>
+          {(["ai", "custom"] as const).map(m => (
+            <button key={m} onClick={() => setPracticeMode(m)} style={{
+              background: practiceMode === m ? "var(--dark)" : "transparent",
+              color: practiceMode === m ? "#fff" : "var(--text-muted)",
+              border: "none", borderRadius: "var(--radius-pill)",
+              padding: "5px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+              transition: "background 0.2s, color 0.2s",
+            }}>
+              {m === "ai" ? "AI Practice" : "Your Speech"}
+            </button>
+          ))}
+        </div>
+
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: camStatus === "live" ? "#22c55e" : "var(--text-muted)" }}>
           <span className={camStatus === "live" ? "live-dot" : undefined} style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
           {camStatus === "live" ? "Live" : "Starting…"}
         </span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button onClick={() => { setSegmentResults([]); setCurrentSegmentIdx(0); loadPracticeSession(true); }} className="btn-ghost" style={{ background: "transparent", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "var(--radius-pill)", padding: "7px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Regenerate</button>
+          {practiceMode === "ai" && (
+            <button onClick={() => { setSegmentResults([]); setCurrentSegmentIdx(0); loadPracticeSession(true); }} className="btn-ghost" style={{ background: "transparent", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "var(--radius-pill)", padding: "7px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Regenerate</button>
+          )}
         </div>
       </div>
 
       <div style={{ padding: "20px 40px 48px", position: "relative", zIndex: 1 }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
 
-          {/* Roadmap stepper */}
-          {practiceSession && (
+          {/* Roadmap stepper — AI mode only */}
+          {practiceMode === "ai" && practiceSession && (
             <Card style={{ marginBottom: 16, padding: "16px 24px" }}>
               <p style={{ margin: "0 0 12px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>
                 {practiceSession.sessionTitle}
@@ -664,62 +704,90 @@ export default function PracticePage() {
                 />
               </div>
 
-              {/* Phase action buttons */}
+              {/* Phase / mode action buttons */}
               <div style={{ display: "flex", gap: 10 }}>
-                {phase === "listen" && (
+                {practiceMode === "custom" ? (
                   <>
                     <button
-                      onClick={() => seg && playCoachAudio(seg.coachIntro + " " + seg.practiceText)}
-                      disabled={audioLoading || audioPlaying}
+                      onClick={() => customText.trim() && playCoachAudio(customText)}
+                      disabled={!customText.trim() || audioLoading || audioPlaying}
                       style={{
                         flex: 1, borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700,
-                        cursor: audioLoading || audioPlaying ? "not-allowed" : "pointer",
-                        background: audioLoading || audioPlaying ? "var(--bg)" : "var(--gold-light)",
-                        color: audioLoading || audioPlaying ? "var(--text-muted)" : "var(--gold)",
+                        cursor: (!customText.trim() || audioLoading || audioPlaying) ? "not-allowed" : "pointer",
+                        background: (!customText.trim() || audioLoading || audioPlaying) ? "var(--bg)" : "var(--gold-light)",
+                        color: (!customText.trim() || audioLoading || audioPlaying) ? "var(--text-muted)" : "var(--gold)",
                         border: "1.5px solid var(--gold-border)",
                       }}
                     >
                       {audioLoading ? "Loading…" : audioPlaying ? "Playing…" : "Listen to Coach"}
                     </button>
                     {audioPlaying && (
-                      <button
-                        onClick={stopCoachAudio}
-                        style={{ background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fca5a5", borderRadius: "var(--radius-pill)", padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
-                      >
+                      <button onClick={stopCoachAudio} style={{ background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fca5a5", borderRadius: "var(--radius-pill)", padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
                         Stop
                       </button>
                     )}
-                    <button
-                      onClick={startRecording}
-                      style={{ flex: 1, background: "var(--dark)", color: "#fff", border: "none", borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
-                    >
-                      Start Repeating
-                    </button>
+                    {!isRecording ? (
+                      <button
+                        onClick={startCustomRecording}
+                        disabled={!customText.trim()}
+                        style={{ flex: 1, background: !customText.trim() ? "var(--bg)" : "var(--dark)", color: !customText.trim() ? "var(--text-muted)" : "#fff", border: "none", borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: !customText.trim() ? "not-allowed" : "pointer" }}
+                      >
+                        Start Recording
+                      </button>
+                    ) : (
+                      <button
+                        onClick={stopCustomRecording}
+                        style={{ flex: 1, background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fca5a5", borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                      >
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />
+                        Stop Recording
+                      </button>
+                    )}
                   </>
-                )}
-
-                {phase === "record" && (
-                  <button
-                    onClick={stopRecording}
-                    style={{ flex: 1, background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fca5a5", borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                  >
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />
-                    Done Repeating
-                  </button>
-                )}
-
-                {phase === "review" && (
-                  <button
-                    onClick={() => nextSegment(segmentResults)}
-                    style={{ flex: 1, background: "var(--dark)", color: "#fff", border: "none", borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
-                  >
-                    {currentSegmentIdx + 1 >= (practiceSession?.segments.length ?? 0) ? "Finish Practice" : "Next Segment →"}
-                  </button>
+                ) : (
+                  <>
+                    {phase === "listen" && (
+                      <>
+                        <button
+                          onClick={() => seg && playCoachAudio(seg.coachIntro + " " + seg.practiceText)}
+                          disabled={audioLoading || audioPlaying}
+                          style={{
+                            flex: 1, borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700,
+                            cursor: audioLoading || audioPlaying ? "not-allowed" : "pointer",
+                            background: audioLoading || audioPlaying ? "var(--bg)" : "var(--gold-light)",
+                            color: audioLoading || audioPlaying ? "var(--text-muted)" : "var(--gold)",
+                            border: "1.5px solid var(--gold-border)",
+                          }}
+                        >
+                          {audioLoading ? "Loading…" : audioPlaying ? "Playing…" : "Listen to Coach"}
+                        </button>
+                        {audioPlaying && (
+                          <button onClick={stopCoachAudio} style={{ background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fca5a5", borderRadius: "var(--radius-pill)", padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                            Stop
+                          </button>
+                        )}
+                        <button onClick={startRecording} style={{ flex: 1, background: "var(--dark)", color: "#fff", border: "none", borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                          Start Repeating
+                        </button>
+                      </>
+                    )}
+                    {phase === "record" && (
+                      <button onClick={stopRecording} style={{ flex: 1, background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fca5a5", borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />
+                        Done Repeating
+                      </button>
+                    )}
+                    {phase === "review" && (
+                      <button onClick={() => nextSegment(segmentResults)} style={{ flex: 1, background: "var(--dark)", color: "#fff", border: "none", borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                        {currentSegmentIdx + 1 >= (practiceSession?.segments.length ?? 0) ? "Finish Practice" : "Next Segment →"}
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
 
               {/* Transcript box */}
-              {(phase === "record" || phase === "review") && (
+              {(practiceMode === "custom" ? (isRecording || customDone) : (phase === "record" || phase === "review")) && (
                 <Card style={{ padding: "14px 16px" }}>
                   <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>Your transcript</p>
                   <div style={{ fontSize: 13, color: transcript || recentTranscript ? "var(--text)" : "var(--text-subtle)", lineHeight: 1.6, maxHeight: 80, overflow: "auto" }}>
@@ -732,8 +800,40 @@ export default function PracticePage() {
             {/* Right panel */}
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
-              {/* Segment card */}
-              {seg && (
+              {/* Your Speech input card */}
+              {practiceMode === "custom" && (
+                <div style={{ borderRadius: "var(--radius-lg)", padding: "20px", border: "1.5px solid var(--gold-border)", background: "var(--gold-light)", boxShadow: "var(--shadow-sm)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                    <span style={{ background: "var(--gold)", color: "#fff", borderRadius: "var(--radius-pill)", padding: "2px 10px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      Your Speech
+                    </span>
+                  </div>
+                  <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
+                    Paste or type any text you want to practice. The AI reads it back first, then you record yourself saying it.
+                  </p>
+                  <textarea
+                    value={customText}
+                    onChange={e => setCustomText(e.target.value)}
+                    placeholder="Paste your speech, a paragraph from your presentation, or anything you want to practice aloud…"
+                    style={{
+                      width: "100%", minHeight: 148, padding: "12px 14px",
+                      fontSize: 13, color: "var(--text)", background: "#fff",
+                      border: "1.5px solid var(--gold-border)", borderRadius: "var(--radius-sm)",
+                      resize: "vertical", fontFamily: "inherit", lineHeight: 1.65,
+                      boxSizing: "border-box", outline: "none",
+                    }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                    <p style={{ margin: 0, fontSize: 11, color: "var(--gold)", fontWeight: 500 }}>
+                      💡 Tip: listen first, then record yourself repeating it
+                    </p>
+                    <p style={{ margin: 0, fontSize: 11, color: "var(--text-subtle)" }}>{customText.length} chars</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Segment card — AI mode only */}
+              {practiceMode === "ai" && seg && (
                 <div style={{
                   borderRadius: "var(--radius-lg)", padding: "20px",
                   border: `1.5px solid ${fs ? fs.pill : "var(--border-light)"}`,
