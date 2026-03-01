@@ -10,7 +10,10 @@ export async function POST(req: NextRequest) {
   try {
     const { avgMetrics, transcript, fullSpeech, durationSecs, wordCount, fillerCount } = await req.json();
 
-    const prompt = `You are a speech coach writing a post-session summary.
+    const prompt = `You are an encouraging speech coach writing a post-session summary.
+Important context: all metrics are 0–1 normalized browser measurements. Values of 0.1–0.4 are completely normal for a real speaker in a browser session — do NOT treat them as poor performance.
+Scoring guide: a solid student or amateur presenter should land 65–85. Reserve scores below 50 for truly poor sessions (incoherent, very short, or no speech at all). Be generous.
+Keep the overview to 2 sentences. List exactly 2–3 genuine strengths and exactly 2 focused, actionable improvements (not a long list of flaws).
 Duration: ${Math.round(durationSecs)}s, Words: ${wordCount}, Fillers: ${fillerCount}
 Avg metrics: ${JSON.stringify(avgMetrics)}
 Transcript: ${transcript || "(none)"}

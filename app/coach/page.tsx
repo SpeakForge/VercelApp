@@ -79,6 +79,8 @@ export default function CoachPage() {
   const audioDataRef = useRef<Uint8Array | null>(null);
   const volumeHistoryRef = useRef<number[]>([]);
   const audioRafRef = useRef<number | null>(null);
+  const sustainedVolumeRef = useRef(0);
+  const sustainedEnergyRef = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
 
   // Metrics history (snapshot every 5s while recording)
@@ -103,6 +105,20 @@ export default function CoachPage() {
   const recRef = useRef<any>(null);
   const isRecordingRef = useRef(false);
 
+  // User session
+  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.name) setUser(d); });
+  }, []);
+
+  const signOut = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/");
+  };
+
   // Gemini state
   const [fullSpeech, setFullSpeech] = useState("");
   const [feedback, setFeedback] = useState<GeminiFeedback | null>(null);
@@ -121,6 +137,7 @@ export default function CoachPage() {
   // Stable refs to avoid stale closures
   const metricsRef = useRef<MetricsSnapshot>({ wpm: 0, fillerCount: 0, gestureEnergy: 0, postureScore: 0, volumeLevel: 0, energyScore: 0, variationScore: 0 });
   const transcriptRef = useRef("");
+  const recentTranscriptRef = useRef("");
   const fullSpeechRef = useRef("");
   const isLiveRef = useRef(false);
   const startedAtRef = useRef<number | null>(null);
@@ -129,6 +146,7 @@ export default function CoachPage() {
     metricsRef.current = { wpm, fillerCount, gestureEnergy, postureScore, volumeLevel, energyScore, variationScore };
   }, [wpm, fillerCount, gestureEnergy, postureScore, volumeLevel, energyScore, variationScore]);
   useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
+  useEffect(() => { recentTranscriptRef.current = recentTranscript; }, [recentTranscript]);
   useEffect(() => { fullSpeechRef.current = fullSpeech; }, [fullSpeech]);
   useEffect(() => { isLiveRef.current = status === "live"; }, [status]);
   useEffect(() => { startedAtRef.current = startedAt; }, [startedAt]);
@@ -184,7 +202,7 @@ export default function CoachPage() {
         analyser.fftSize = 2048;
         analyserRef.current = analyser;
         src.connect(analyser);
-        audioDataRef.current = new Uint8Array(analyser.fftSize);
+        audioDataRef.current = new Uint8Array(analyser.fftSize) as Uint8Array<ArrayBuffer>;
         setStatus("live");
       } catch { setStatus("error"); }
     })();
@@ -202,20 +220,28 @@ export default function CoachPage() {
         analyser.getByteTimeDomainData(data);
         let sumSq = 0;
         for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sumSq += v * v; }
-        // Increased sensitivity: ×8 so normal speech hits 0.3–0.6, yelling 0.8+
-        const level = clamp01(Math.sqrt(sumSq / data.length) * 8);
-        setVolumeLevel(level);
-        // Faster EMA so energy responds quickly
-        setEnergyScore(p => clamp01(p * 0.6 + level * 0.4));
+        // ×14 sensitivity: normal speech hits 0.4–0.7, yelling 0.9+
+        const rawLevel = clamp01(Math.sqrt(sumSq / data.length) * 14);
+
+        // Fast attack, slow decay — holds the reading through natural pauses
+        const speaking = rawLevel > 0.04;
+        sustainedVolumeRef.current = speaking
+          ? clamp01(sustainedVolumeRef.current * 0.3 + rawLevel * 0.7)
+          : clamp01(sustainedVolumeRef.current * 0.90);
+        sustainedEnergyRef.current = speaking
+          ? clamp01(sustainedEnergyRef.current * 0.4 + rawLevel * 0.6)
+          : clamp01(sustainedEnergyRef.current * 0.93);
+        setVolumeLevel(sustainedVolumeRef.current);
+        setEnergyScore(sustainedEnergyRef.current);
 
         const hist = volumeHistoryRef.current;
-        hist.push(level);
+        hist.push(rawLevel);
         if (hist.length > 120) hist.shift();
-        // Variation = dynamic range of recent 20 frames (max−min), scaled up
+        // Variation = dynamic range of recent ~40 frames (~670 ms), scaled up
         if (hist.length >= 10) {
-          const recent = hist.slice(-20);
+          const recent = hist.slice(-40);
           const hi = Math.max(...recent), lo = Math.min(...recent);
-          setVariationScore(clamp01((hi - lo) * 4));
+          setVariationScore(clamp01((hi - lo) * 6));
         }
       }
       audioRafRef.current = requestAnimationFrame(tick);
@@ -321,11 +347,13 @@ export default function CoachPage() {
     if (!startedAt) return;
     const id = setInterval(() => {
       const secs = (Date.now() - startedAt) / 1000;
-      setWpm(estimateWpm(transcript.split(/\s+/).filter(Boolean).length, secs));
-      setFillerCount(countFillers(transcript));
+      // Include interim words so WPM doesn't lag behind finalized results
+      const combined = (transcriptRef.current + " " + recentTranscriptRef.current).trim();
+      setWpm(estimateWpm(combined.split(/\s+/).filter(Boolean).length, secs));
+      setFillerCount(countFillers(transcriptRef.current));
     }, 1000);
     return () => clearInterval(id);
-  }, [startedAt, transcript]);
+  }, [startedAt]);
 
   // ── Pose detection ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -502,15 +530,25 @@ export default function CoachPage() {
             <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.5px" }}>🎙️ SpeakForge</span>
             <span style={{ fontSize: 12, color: "#94a3b8" }}>Live Coach</span>
           </div>
-          <span style={{
-            display: "flex", alignItems: "center", gap: 5,
-            padding: "5px 14px", borderRadius: 999, fontSize: 12, fontWeight: 600,
-            background: status === "live" ? "#dcfce7" : status === "error" ? "#fee2e2" : "#f1f5f9",
-            color: status === "live" ? "#15803d" : status === "error" ? "#dc2626" : "#64748b",
-          }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
-            {status === "live" ? "Live" : status === "error" ? "Permission denied" : "Starting..."}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {user && (
+              <span style={{ fontSize: 13, color: "#475569", fontWeight: 500 }}>
+                Hi, {user.name}
+              </span>
+            )}
+            <span style={{
+              display: "flex", alignItems: "center", gap: 5,
+              padding: "5px 14px", borderRadius: 999, fontSize: 12, fontWeight: 600,
+              background: status === "live" ? "#dcfce7" : status === "error" ? "#fee2e2" : "#f1f5f9",
+              color: status === "live" ? "#15803d" : status === "error" ? "#dc2626" : "#64748b",
+            }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
+              {status === "live" ? "Live" : status === "error" ? "Permission denied" : "Starting..."}
+            </span>
+            <button onClick={signOut} style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              Sign Out
+            </button>
+          </div>
         </div>
 
         {/* Planned speech */}

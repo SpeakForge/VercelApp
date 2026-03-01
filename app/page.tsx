@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 const NAV_LINKS = ["What is SpeakForge?", "How It Works", "Features", "Pricing"];
 
@@ -60,6 +62,21 @@ const FEATURES_RIGHT = [
 ];
 
 export default function LandingPage() {
+  const router = useRouter();
+  const [user, setUser] = useState<{ name: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.name) setUser(d); });
+  }, []);
+
+  const signOut = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setUser(null);
+    router.refresh();
+  };
+
   return (
     <div
       style={{
@@ -104,37 +121,81 @@ export default function LandingPage() {
 
           {/* Actions */}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button
-              style={{
-                background: "transparent",
-                border: "1px solid #e2e8f0",
-                borderRadius: 999,
-                padding: "8px 18px",
-                fontSize: 14,
-                cursor: "pointer",
-                color: "#0d1117",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Sign In
-            </button>
-            <Link href="/coach">
-              <button
-                style={{
-                  background: "#3b5bdb",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 999,
-                  padding: "8px 20px",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Get Started Free →
-              </button>
-            </Link>
+            {user ? (
+              <>
+                <span style={{ fontSize: 14, color: "#475569", whiteSpace: "nowrap" }}>
+                  Hi, <strong>{user.name}</strong>
+                </span>
+                <button
+                  onClick={signOut}
+                  style={{
+                    background: "transparent",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: 999,
+                    padding: "8px 18px",
+                    fontSize: 14,
+                    cursor: "pointer",
+                    color: "#0d1117",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Sign Out
+                </button>
+                <Link href="/coach">
+                  <button
+                    style={{
+                      background: "#3b5bdb",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 999,
+                      padding: "8px 20px",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Go to Coach →
+                  </button>
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link href="/auth">
+                  <button
+                    style={{
+                      background: "transparent",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 999,
+                      padding: "8px 18px",
+                      fontSize: 14,
+                      cursor: "pointer",
+                      color: "#0d1117",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Sign In
+                  </button>
+                </Link>
+                <Link href="/coach">
+                  <button
+                    style={{
+                      background: "#3b5bdb",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 999,
+                      padding: "8px 20px",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Get Started Free →
+                  </button>
+                </Link>
+              </>
+            )}
           </div>
         </nav>
       </div>
