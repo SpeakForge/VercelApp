@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+SpeakForge is a real-time public speaking feedback tool that was built with Next.js, MediaPipe, and the Web Audio API. The live feedback is based on posture, gestures, pacing, vocal energy, and filler words, which can all be viewed as the user speaks.
 
-## Getting Started
+Overview
 
-First, run the development server:
+When a user opens the application and enables their camera and microphone, the system does the following:
+-Tracks body posture and gesture movement using MediaPipe Pose.
+-Analyzes vocal energy and variation using the Web Audio API.
+-Transcribes speech in real time using the browser's Speech Recognition API.
+-Calculates WPM and filler word frequency.
+-Sends live metrics and transcript data to a Gemini API endpoint.
+-Receives AI feedback focused on the single biggest issue.
+-Displays live metrics and an overlay for feedback.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Features
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Video analysis
+Uses MediaPipe Pose to detect:
+-Shoulder alignment
+-Head position
+-Wrist movement
+-Gesture intensity
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Voice analysis
+Uses the Web Audio API to compute:
+-Volume level
+-Smoothed vocal energy
+-Vocal variation (standard deviation over time)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Speech analysis
+Uses the Web Speech API to:
+-Transcribe speech
+-Calculate WPM
+-Count filler words: "um", "uh", "like", and "you know"
 
-## Learn More
+Feedback is based on metrics and their thresholds. For example:
 
-To learn more about Next.js, take a look at the following resources:
+High WPM: "Slow down your pace"
+Low energy: "Add more vocal energy"
+High filler count: "Reduce filler words."
+Poor posture: "Straighten your posture"
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Manual feedback trigger
+A "Get feedback now" button evaluates current performance instead of running on an automatic interval to conserve tokens.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+AI feedback:
 
-## Deploy on Vercel
+Uses Gemini API to:
+Analyze metrics and transcript content
+Identify the single biggest speaking weakness in that moment (when the button is pressed)
+Return JSON feedback
+Generate coaching tips (under 6 words)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Tech Stack:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Next.js (App Router): Frontend and API routes
+React (Client Components): Real-time UI updates
+MediaPipe Tasks Vision: Pose and gesture detection
+Web Audio API: Vocal energy and variation analysis
+Web Speech API: Live speech transcription
+Gemini API (generateContent): AI-powered coaching feedback
+TypeScript: Type safety and structured development

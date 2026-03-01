@@ -88,6 +88,8 @@ export default function CoachPage() {
   const audioDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const volumeHistoryRef = useRef<number[]>([]);
   const audioRafRef = useRef<number | null>(null);
+  const sustainedVolumeRef = useRef(0);
+  const sustainedEnergyRef = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
 
   // Metrics history (snapshot every 5s while recording)
@@ -112,6 +114,20 @@ export default function CoachPage() {
   const recRef = useRef<any>(null);
   const isRecordingRef = useRef(false);
 
+  // User session
+  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.name) setUser(d); });
+  }, []);
+
+  const signOut = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/");
+  };
+
   // Gemini state
   const [fullSpeech, setFullSpeech] = useState("");
   const [feedback, setFeedback] = useState<GeminiFeedback | null>(null);
@@ -130,7 +146,9 @@ export default function CoachPage() {
   // Stable refs to avoid stale closures
   const metricsRef = useRef<MetricsSnapshot>({ wpm: 0, fillerCount: 0, gestureEnergy: 0, postureScore: 0, volumeLevel: 0, energyScore: 0, variationScore: 0 });
   const transcriptRef = useRef("");
+  const recentTranscriptRef = useRef("");
   const fullSpeechRef = useRef("");
+  const feedbackRef = useRef<GeminiFeedback | null>(null);
   const isLiveRef = useRef(false);
   const startedAtRef = useRef<number | null>(null);
 
@@ -138,7 +156,9 @@ export default function CoachPage() {
     metricsRef.current = { wpm, fillerCount, gestureEnergy, postureScore, volumeLevel, energyScore, variationScore };
   }, [wpm, fillerCount, gestureEnergy, postureScore, volumeLevel, energyScore, variationScore]);
   useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
+  useEffect(() => { recentTranscriptRef.current = recentTranscript; }, [recentTranscript]);
   useEffect(() => { fullSpeechRef.current = fullSpeech; }, [fullSpeech]);
+  useEffect(() => { feedbackRef.current = feedback; }, [feedback]);
   useEffect(() => { isLiveRef.current = status === "live"; }, [status]);
   useEffect(() => { startedAtRef.current = startedAt; }, [startedAt]);
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
@@ -211,17 +231,28 @@ export default function CoachPage() {
         analyser.getByteTimeDomainData(data);
         let sumSq = 0;
         for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sumSq += v * v; }
-        const level = clamp01(Math.sqrt(sumSq / data.length) * 8);
-        setVolumeLevel(level);
-        setEnergyScore(p => clamp01(p * 0.6 + level * 0.4));
+        // ×14 sensitivity: normal speech hits 0.4–0.7, yelling 0.9+
+        const rawLevel = clamp01(Math.sqrt(sumSq / data.length) * 14);
+
+        // Fast attack, slow decay — holds the reading through natural pauses
+        const speaking = rawLevel > 0.04;
+        sustainedVolumeRef.current = speaking
+          ? clamp01(sustainedVolumeRef.current * 0.3 + rawLevel * 0.7)
+          : clamp01(sustainedVolumeRef.current * 0.90);
+        sustainedEnergyRef.current = speaking
+          ? clamp01(sustainedEnergyRef.current * 0.4 + rawLevel * 0.6)
+          : clamp01(sustainedEnergyRef.current * 0.93);
+        setVolumeLevel(sustainedVolumeRef.current);
+        setEnergyScore(sustainedEnergyRef.current);
 
         const hist = volumeHistoryRef.current;
-        hist.push(level);
+        hist.push(rawLevel);
         if (hist.length > 120) hist.shift();
+        // Variation = dynamic range of recent ~40 frames (~670 ms), scaled up
         if (hist.length >= 10) {
-          const recent = hist.slice(-20);
+          const recent = hist.slice(-40);
           const hi = Math.max(...recent), lo = Math.min(...recent);
-          setVariationScore(clamp01((hi - lo) * 4));
+          setVariationScore(clamp01((hi - lo) * 6));
         }
       }
       audioRafRef.current = requestAnimationFrame(tick);
@@ -249,9 +280,19 @@ export default function CoachPage() {
       const last = event.results.length - 1;
       if (last >= 0 && !event.results[last].isFinal)
         interim = (event.results[last][0]?.transcript || "").trim();
+      // Update refs immediately (before render) so WPM interval never reads stale data
+      transcriptRef.current = finalFull.trim();
+      recentTranscriptRef.current = interim;
       setTranscript(finalFull.trim());
       setRecentTranscript(interim);
       if (!startedAtRef.current) setStartedAt(Date.now());
+      // Instant WPM on every speech event — no 1-second lag
+      if (startedAtRef.current) {
+        const secs = (Date.now() - startedAtRef.current) / 1000;
+        const combined = (finalFull.trim() + " " + interim).trim();
+        setWpm(estimateWpm(combined.split(/\s+/).filter(Boolean).length, secs));
+        setFillerCount(countFillers(finalFull.trim()));
+      }
     };
     rec.onend = () => { if (isRecordingRef.current) rec.start(); };
     recRef.current = rec;
@@ -303,6 +344,22 @@ export default function CoachPage() {
       if (res.ok) {
         const data = await res.json();
         setSummaryResult(data);
+
+        // Save full session to DB (fire-and-forget)
+        fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            durationSecs: snap.durationSecs,
+            wordCount: snap.wordCount,
+            fillerCount: snap.fillerCount,
+            transcript: snap.transcript,
+            plannedSpeech: fullSpeechRef.current,
+            avgMetrics: snap.avgMetrics,
+            summary: data,
+            lastFeedback: feedbackRef.current,
+          }),
+        }).catch(e => console.error("Session save error:", e));
       }
     } catch (e) { console.error("Summary error:", e); }
     finally { setSummaryLoading(false); }
@@ -325,11 +382,13 @@ export default function CoachPage() {
     if (!startedAt) return;
     const id = setInterval(() => {
       const secs = (Date.now() - startedAt) / 1000;
-      setWpm(estimateWpm(transcript.split(/\s+/).filter(Boolean).length, secs));
-      setFillerCount(countFillers(transcript));
+      // Include interim words so WPM doesn't lag behind finalized results
+      const combined = (transcriptRef.current + " " + recentTranscriptRef.current).trim();
+      setWpm(estimateWpm(combined.split(/\s+/).filter(Boolean).length, secs));
+      setFillerCount(countFillers(transcriptRef.current));
     }, 1000);
     return () => clearInterval(id);
-  }, [startedAt, transcript]);
+  }, [startedAt]);
 
   // ── Pose detection ────────────────────────────────────────────────────────
   useEffect(() => {
