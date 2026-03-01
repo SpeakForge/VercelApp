@@ -1,0 +1,117 @@
+/* ── Hero Diagonal Streak ─────────────────────────────────────── */
+.sf-card {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  top: 45%;
+  height: 340px;
+  background: #243137;
+  transform: translateY(-50%);
+  clip-path: polygon(0 24%, 100% 0%, 100% 76%, 0% 100%);
+  display: grid;
+  place-content: center;
+  overflow: hidden;
+  transition: clip-path 0.6s ease-in-out;
+  cursor: default;
+  user-select: none;
+}
+
+.sf-card:hover {
+  clip-path: polygon(0 16%, 100% 0%, 100% 84%, 0% 100%);
+}
+
+/* Not used in streak layout */
+.sf-border      { display: none; }
+.sf-bottom-text { display: none; }
+
+.sf-content {
+  transition: all 0.5s ease-in-out;
+}
+
+/* Clipping container — starts at "speak" width, expands to full "speakforge" */
+.sf-logo {
+  height: 80px;
+  position: relative;
+  width: 175px;
+  overflow: hidden;
+  transition: width 1s ease-in-out;
+}
+
+.sf-card:hover .sf-logo {
+  width: 372px;
+  animation: sfOpacity 1s ease-in-out;
+}
+
+.sf-logo1 {
+  height: 80px;
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 72px;
+  font-weight: 300;
+  color: #bd9f67;
+  letter-spacing: -3px;
+  line-height: 80px;
+  white-space: nowrap;
+}
+
+.sf-logo2 {
+  height: 80px;
+  position: absolute;
+  left: 175px;
+  top: 0;
+  font-size: 72px;
+  font-weight: 900;
+  color: #bd9f67;
+  letter-spacing: -3px;
+  line-height: 80px;
+  white-space: nowrap;
+}
+
+.sf-trail {
+  position: absolute;
+  right: 0;
+  height: 100%;
+  width: 100%;
+  opacity: 0;
+}
+
+.sf-card:hover .sf-trail {
+  animation: sfTrail 1s ease-in-out;
+}
+
+/* "speak with confidence" — fades in below the logo */
+.sf-logo-bottom-text {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  margin-top: 58px;
+  color: #bd9f67;
+  padding-left: 8px;
+  font-size: 15px;
+  text-transform: uppercase;
+  opacity: 0;
+  letter-spacing: 0px;
+  white-space: nowrap;
+  transition: all 0.5s ease-in-out 0.5s;
+}
+
+.sf-card:hover .sf-logo-bottom-text {
+  opacity: 1;
+  letter-spacing: 5px;
+}
+
+@keyframes sfOpacity {
+  0%   { border-right: 1px solid transparent; }
+  10%  { border-right: 1px solid #bd9f67; }
+  80%  { border-right: 1px solid #bd9f67; }
+  100% { border-right: 1px solid transparent; }
+}
+
+@keyframes sfTrail {
+  0%  { background: linear-gradient(90deg, rgba(189, 159, 103, 0) 90%, rgb(189, 159, 103) 100%); opacity: 0; }
+  30% { background: linear-gradient(90deg, rgba(189, 159, 103, 0) 70%, rgb(189, 159, 103) 100%); opacity: 1; }
+  70% { background: linear-gradient(90deg, rgba(189, 159, 103, 0) 70%, rgb(189, 159, 103) 100%); opacity: 1; }
+  95% { background: linear-gradient(90deg, rgba(189, 159, 103, 0) 90%, rgb(189, 159, 103) 100%); opacity: 0; }
+}

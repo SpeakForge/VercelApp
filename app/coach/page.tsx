@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
+import Navbar from "../components/Navbar";
+import Card from "../components/Card";
+import Button from "../components/Button";
 
 // ── Types & constants ────────────────────────────────────────────────────────
 
@@ -53,10 +56,16 @@ function clamp01(x: number) { return Math.max(0, Math.min(1, x)); }
 
 function avg(arr: number[]) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 
-function ScoreBar({ value, color = "#6d28d9" }: { value: number; color?: string }) {
+function ScoreBar({ value, color = "#7c6ff7" }: { value: number; color?: string }) {
   return (
-    <div style={{ height: 6, background: "#f1f5f9", borderRadius: 99, overflow: "hidden", marginTop: 4 }}>
-      <div style={{ height: "100%", width: `${Math.round(value * 100)}%`, background: color, borderRadius: 99, transition: "width 0.4s ease" }} />
+    <div style={{ height: 5, background: "var(--surface2)", borderRadius: 99, overflow: "hidden", marginTop: 5 }}>
+      <div style={{
+        height: "100%",
+        width: `${Math.round(value * 100)}%`,
+        background: color,
+        borderRadius: 99,
+        transition: "width 0.4s ease",
+      }} />
     </div>
   );
 }
@@ -76,7 +85,7 @@ export default function CoachPage() {
   // Audio refs
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const audioDataRef = useRef<Uint8Array | null>(null);
+  const audioDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const volumeHistoryRef = useRef<number[]>([]);
   const audioRafRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -184,7 +193,7 @@ export default function CoachPage() {
         analyser.fftSize = 2048;
         analyserRef.current = analyser;
         src.connect(analyser);
-        audioDataRef.current = new Uint8Array(analyser.fftSize);
+        audioDataRef.current = new Uint8Array(analyser.fftSize) as Uint8Array<ArrayBuffer>;
         setStatus("live");
       } catch { setStatus("error"); }
     })();
@@ -202,16 +211,13 @@ export default function CoachPage() {
         analyser.getByteTimeDomainData(data);
         let sumSq = 0;
         for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sumSq += v * v; }
-        // Increased sensitivity: ×8 so normal speech hits 0.3–0.6, yelling 0.8+
         const level = clamp01(Math.sqrt(sumSq / data.length) * 8);
         setVolumeLevel(level);
-        // Faster EMA so energy responds quickly
         setEnergyScore(p => clamp01(p * 0.6 + level * 0.4));
 
         const hist = volumeHistoryRef.current;
         hist.push(level);
         if (hist.length > 120) hist.shift();
-        // Variation = dynamic range of recent 20 frames (max−min), scaled up
         if (hist.length >= 10) {
           const recent = hist.slice(-20);
           const hi = Math.max(...recent), lo = Math.min(...recent);
@@ -267,7 +273,6 @@ export default function CoachPage() {
     isRecordingRef.current = false;
     recRef.current.stop();
 
-    // Capture session snapshot
     const durationSecs = sessionStartRef.current ? (Date.now() - sessionStartRef.current) / 1000 : 0;
     const hist = metricsHistoryRef.current;
     const snap = {
@@ -288,7 +293,6 @@ export default function CoachPage() {
     setSummarySnapshot(snap);
     setShowSummary(true);
 
-    // Call summary AI
     setSummaryLoading(true);
     try {
       const res = await fetch("/api/summary", {
@@ -377,112 +381,124 @@ export default function CoachPage() {
     const mins = Math.floor(s.durationSecs / 60), secs = Math.round(s.durationSecs % 60);
 
     return (
-      <div style={{ minHeight: "100vh", background: "#f8fafc", padding: "24px 20px" }}>
-        <div style={{ maxWidth: 800, margin: "0 auto" }}>
+      <div style={{ minHeight: "100vh", background: "var(--bg)", position: "relative" }}>
+        <Navbar />
 
-          {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.5px" }}>🎙️ SpeakForge</span>
-              <span style={{ fontSize: 12, color: "#94a3b8" }}>Session Summary</span>
-            </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => router.push("/")} style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "8px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                ← Back
-              </button>
-              <button onClick={restartSession} style={{ background: "#3b5bdb", color: "#fff", border: "none", borderRadius: 10, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                ↺ New Session
-              </button>
-            </div>
+        {/* Sub-header */}
+        <div style={{ borderBottom: "1px solid var(--border-light)", padding: "16px 40px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(247,250,252,0.8)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", position: "relative", zIndex: 1 }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 900, letterSpacing: "-0.6px", color: "var(--text)" }}>Session Summary</h1>
+            <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>SpeakForge · AI Coach</p>
           </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button variant="ghost" size="sm" onClick={() => router.push("/")}>← Back</Button>
+            <Button variant="primary" size="sm" onClick={restartSession}>↺ New Session</Button>
+          </div>
+        </div>
 
-          {/* Score banner */}
-          {summaryLoading ? (
-            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "28px", textAlign: "center", marginBottom: 16, color: "#94a3b8", fontSize: 14 }}>
-              ✨ Generating your personalized summary…
-            </div>
-          ) : summaryResult && (
-            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "24px", marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>AI Overview</p>
-                  <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: "#0d1117" }}>{summaryResult.overview}</p>
-                </div>
-                <div style={{ textAlign: "center", flexShrink: 0 }}>
-                  <div style={{ fontSize: 48, fontWeight: 900, color: summaryResult.score >= 70 ? "#15803d" : summaryResult.score >= 45 ? "#b45309" : "#dc2626", letterSpacing: "-2px" }}>
-                    {summaryResult.score}
+        <div style={{ padding: "32px 40px 60px", position: "relative", zIndex: 1 }}>
+            <div style={{ maxWidth: 860, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
+
+              {/* Score banner */}
+              {summaryLoading ? (
+                <Card style={{ textAlign: "center", color: "var(--text-subtle)", fontSize: 14, padding: "32px" }}>
+                  ✨ Generating your personalized summary…
+                </Card>
+              ) : summaryResult && (
+                <Card className="anim-scaleIn">
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <p style={{ margin: "0 0 6px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>AI Overview</p>
+                      <p style={{ margin: 0, fontSize: 15, lineHeight: 1.7, color: "var(--text)" }}>{summaryResult.overview}</p>
+                    </div>
+                    <div style={{ textAlign: "center", flexShrink: 0 }}>
+                      <div style={{
+                        fontSize: 52,
+                        fontWeight: 900,
+                        letterSpacing: "-2px",
+                        color: summaryResult.score >= 70 ? "#15803d" : summaryResult.score >= 45 ? "#b45309" : "#dc2626",
+                      }}>
+                        {summaryResult.score}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text-subtle)", fontWeight: 600 }}>/ 100</div>
+                    </div>
                   </div>
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>/ 100</div>
-                </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 16 }}>
-                <div style={{ background: "#f0fdf4", borderRadius: 10, padding: "12px 14px" }}>
-                  <p style={{ margin: "0 0 6px", fontSize: 11, fontWeight: 700, color: "#15803d" }}>✅ Strengths</p>
-                  {summaryResult.strengths.map((s, i) => <p key={i} style={{ margin: "2px 0", fontSize: 13, color: "#166534" }}>• {s}</p>)}
-                </div>
-                <div style={{ background: "#fff7ed", borderRadius: 10, padding: "12px 14px" }}>
-                  <p style={{ margin: "0 0 6px", fontSize: 11, fontWeight: 700, color: "#c2410c" }}>🎯 Improve</p>
-                  {summaryResult.improvements.map((s, i) => <p key={i} style={{ margin: "2px 0", fontSize: 13, color: "#9a3412" }}>• {s}</p>)}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Session stats */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
-            {[
-              { label: "Duration", value: `${mins}:${String(secs).padStart(2, "0")}` },
-              { label: "Words", value: String(s.wordCount) },
-              { label: "Avg WPM", value: String(m.wpm) },
-              { label: "Fillers", value: String(s.fillerCount) },
-            ].map(({ label, value }) => (
-              <div key={label} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px", textAlign: "center" }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#0d1117" }}>{value}</div>
-                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{label}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Avg metrics */}
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "20px", marginBottom: 16 }}>
-            <p style={{ margin: "0 0 14px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>Average Metrics</p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 24px" }}>
-              {[
-                { label: "Gesture Energy", value: m.gestureEnergy, color: "#10b981" },
-                { label: "Posture", value: m.postureScore, color: "#6366f1" },
-                { label: "Energy", value: m.energyScore, color: "#8b5cf6" },
-                { label: "Variation", value: m.variationScore, color: "#06b6d4" },
-                { label: "Volume", value: m.volumeLevel, color: "#ec4899" },
-              ].map(({ label, value, color }) => (
-                <div key={label}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                    <span style={{ color: "#64748b" }}>{label}</span>
-                    <span style={{ fontWeight: 700 }}>{value.toFixed(2)}</span>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 18 }}>
+                    <div style={{ background: "#f0fdf4", borderRadius: "var(--radius-sm)", padding: "14px 16px" }}>
+                      <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, color: "#15803d" }}>✅ Strengths</p>
+                      {summaryResult.strengths.map((str, i) => (
+                        <p key={i} style={{ margin: "3px 0", fontSize: 13, color: "#166534" }}>• {str}</p>
+                      ))}
+                    </div>
+                    <div style={{ background: "#fff7ed", borderRadius: "var(--radius-sm)", padding: "14px 16px" }}>
+                      <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, color: "#c2410c" }}>🎯 Improve</p>
+                      {summaryResult.improvements.map((imp, i) => (
+                        <p key={i} style={{ margin: "3px 0", fontSize: 13, color: "#9a3412" }}>• {imp}</p>
+                      ))}
+                    </div>
                   </div>
-                  <ScoreBar value={value} color={color} />
+                </Card>
+              )}
+
+              {/* Session stats */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+                {[
+                  { label: "Duration", value: `${mins}:${String(secs).padStart(2, "0")}` },
+                  { label: "Words",    value: String(s.wordCount) },
+                  { label: "Avg WPM",  value: String(m.wpm) },
+                  { label: "Fillers",  value: String(s.fillerCount) },
+                ].map(({ label, value }) => (
+                  <Card key={label} hoverable style={{ textAlign: "center", padding: "18px 16px" }}>
+                    <div style={{ fontSize: 26, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.5px" }}>{value}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-subtle)", marginTop: 4, fontWeight: 500 }}>{label}</div>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Avg metrics */}
+              <Card>
+                <p style={{ margin: "0 0 16px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>Average Metrics</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 28px" }}>
+                  {[
+                    { label: "Gesture Energy", value: m.gestureEnergy,  color: "#10b981" },
+                    { label: "Posture",         value: m.postureScore,   color: "#7c6ff7" },
+                    { label: "Energy",          value: m.energyScore,    color: "#8b5cf6" },
+                    { label: "Variation",       value: m.variationScore, color: "#06b6d4" },
+                    { label: "Volume",          value: m.volumeLevel,    color: "#ec4899" },
+                  ].map(({ label, value, color }) => (
+                    <div key={label}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                        <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>{label}</span>
+                        <span style={{ fontWeight: 700, color: "var(--text)" }}>{value.toFixed(2)}</span>
+                      </div>
+                      <ScoreBar value={value} color={color} />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </Card>
+
+              {/* Transcript */}
+              <Card>
+                <p style={{ margin: "0 0 12px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>Full Transcript</p>
+                <div style={{
+                  fontSize: 14,
+                  color: s.transcript ? "var(--text)" : "var(--text-subtle)",
+                  lineHeight: 1.75,
+                  whiteSpace: "pre-wrap",
+                  maxHeight: 240,
+                  overflow: "auto",
+                }}>
+                  {s.transcript || "(no transcript recorded)"}
+                </div>
+              </Card>
+
+              {/* Bottom buttons */}
+              <div style={{ display: "flex", gap: 12, justifyContent: "center", paddingTop: 4 }}>
+                <Button variant="ghost" size="md" onClick={() => router.push("/")}>← Back to Home</Button>
+                <Button variant="primary" size="md" onClick={restartSession}>↺ Start New Session</Button>
+              </div>
+
             </div>
-          </div>
-
-          {/* Transcript */}
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "20px", marginBottom: 24 }}>
-            <p style={{ margin: "0 0 10px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>Full Transcript</p>
-            <div style={{ fontSize: 14, color: s.transcript ? "#0d1117" : "#cbd5e1", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
-              {s.transcript || "(no transcript recorded)"}
-            </div>
-          </div>
-
-          {/* Bottom buttons */}
-          <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-            <button onClick={() => router.push("/")} style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "12px 28px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
-              ← Back to Home
-            </button>
-            <button onClick={restartSession} style={{ background: "#3b5bdb", color: "#fff", border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-              ↺ Start New Session
-            </button>
-          </div>
-
         </div>
       </div>
     );
@@ -491,159 +507,225 @@ export default function CoachPage() {
   // ── Render: Live coach ────────────────────────────────────────────────────
   const fs = feedback ? FOCUS_STYLES[feedback.focus] : null;
 
+  const statusColor = status === "live" ? "#22c55e" : status === "error" ? "#ef4444" : "#94a3b8";
+  const statusLabel = status === "live" ? "Live" : status === "error" ? "Permission denied" : "Starting…";
+
   return (
-    <div style={{ minHeight: "100vh", background: "#f8fafc", padding: "24px 20px" }}>
-      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+    <div style={{ minHeight: "100vh", background: "var(--bg)", position: "relative" }}>
+      <div className="bg-blobs" aria-hidden><div className="bg-blob-bottom" /></div>
+      <Navbar />
 
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button onClick={() => router.push("/")} style={{ background: "none", border: "none", fontSize: 13, color: "#94a3b8", cursor: "pointer", padding: 0 }}>← Home</button>
-            <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.5px" }}>🎙️ SpeakForge</span>
-            <span style={{ fontSize: 12, color: "#94a3b8" }}>Live Coach</span>
-          </div>
-          <span style={{
-            display: "flex", alignItems: "center", gap: 5,
-            padding: "5px 14px", borderRadius: 999, fontSize: 12, fontWeight: 600,
-            background: status === "live" ? "#dcfce7" : status === "error" ? "#fee2e2" : "#f1f5f9",
-            color: status === "live" ? "#15803d" : status === "error" ? "#dc2626" : "#64748b",
-          }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
-            {status === "live" ? "Live" : status === "error" ? "Permission denied" : "Starting..."}
-          </span>
-        </div>
+      {/* Sub-header */}
+      <div style={{ borderBottom: "1px solid var(--border-light)", padding: "16px 40px", display: "flex", alignItems: "center", gap: 14, background: "rgba(247,250,252,0.8)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", position: "relative", zIndex: 1 }}>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 900, letterSpacing: "-0.6px", color: "var(--text)" }}>Live Coach</h1>
+        <span style={{
+          display: "inline-flex", alignItems: "center", gap: 6,
+          fontSize: 12, fontWeight: 600, color: statusColor,
+        }}>
+          <span className={status === "live" ? "live-dot" : undefined} style={{ width: 7, height: 7, borderRadius: "50%", background: statusColor, display: "inline-block" }} />
+          {statusLabel}
+        </span>
+      </div>
 
-        {/* Planned speech */}
-        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: "16px 20px", marginBottom: 16 }}>
-          <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>
-            📋 Planned Speech
-            <span style={{ fontWeight: 400, color: "#94a3b8", marginLeft: 6 }}>Paste your script so AI can remind you of missing topics</span>
-          </label>
-          <textarea
-            value={fullSpeech}
-            onChange={e => setFullSpeech(e.target.value)}
-            placeholder="Paste your full script here before presenting..."
-            style={{ width: "100%", height: 64, borderRadius: 8, border: "1px solid #e2e8f0", padding: "8px 12px", fontSize: 13, resize: "vertical", background: "#f8fafc", boxSizing: "border-box", color: "#0d1117" }}
-          />
-        </div>
+      <div style={{ padding: "20px 40px 48px", position: "relative", zIndex: 1 }}>
+          <div style={{ maxWidth: 1120, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
 
-        {/* Main grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 16, alignItems: "start" }}>
-
-          {/* Video + controls */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <video
-              ref={videoRef} playsInline muted
-              style={{ width: "100%", borderRadius: 16, background: "#0f172a", display: "block", transform: "scaleX(-1)", aspectRatio: "16/9", objectFit: "cover" }}
-            />
-            <div style={{ display: "flex", gap: 10 }}>
-              <button
-                onClick={isRecording ? stopRecording : startRecording}
+            {/* Planned speech */}
+            <Card style={{ padding: "16px 20px" }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>
+                📋 Planned Speech
+                <span style={{ fontWeight: 400, color: "var(--text-subtle)", marginLeft: 8, fontSize: 12 }}>
+                  Paste your script so AI can remind you of missing topics
+                </span>
+              </label>
+              <textarea
+                value={fullSpeech}
+                onChange={e => setFullSpeech(e.target.value)}
+                placeholder="Paste your full script here before presenting…"
                 style={{
-                  flex: 1,
-                  background: isRecording ? "#fee2e2" : "#dcfce7",
-                  color: isRecording ? "#dc2626" : "#15803d",
-                  border: `1.5px solid ${isRecording ? "#fca5a5" : "#86efac"}`,
-                  borderRadius: 10, padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                  width: "100%",
+                  height: 60,
+                  borderRadius: "var(--radius-sm)",
+                  border: "1.5px solid var(--border)",
+                  padding: "8px 12px",
+                  fontSize: 13,
+                  resize: "vertical",
+                  background: "var(--bg)",
+                  boxSizing: "border-box",
+                  color: "var(--text)",
+                  outline: "none",
+                  fontFamily: "inherit",
+                  transition: "border-color 0.15s ease",
                 }}
-              >
-                {isRecording ? "⏹ Stop & Summarize" : "⏺ Start Recording"}
-              </button>
-              <button
-                onClick={clearTranscript}
-                style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
-              >
-                Clear
-              </button>
-            </div>
-          </div>
+                onFocus={e => (e.target.style.borderColor = "var(--accent)")}
+                onBlur={e => (e.target.style.borderColor = "var(--border)")}
+              />
+            </Card>
 
-          {/* Right panel */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* Main grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 370px", gap: 14, alignItems: "start" }}>
 
-            {/* AI Feedback card */}
-            <div style={{
-              borderRadius: 16, border: `1.5px solid ${fs ? fs.pill : "#e2e8f0"}`,
-              background: fs ? fs.bg : "#fff", padding: "20px",
-              transition: "background 0.5s, border-color 0.5s", minHeight: 120,
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>AI Coach</span>
-                {feedback && fs && (
-                  <span style={{ background: fs.pill, color: fs.accent, borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>
-                    {FOCUS_ICONS[feedback.focus]} {feedback.focus}
-                  </span>
-                )}
-                <button
-                  onClick={askCoach}
-                  disabled={feedbackLoading}
+              {/* Left: Video + controls */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{
+                  borderRadius: "var(--radius-xl)",
+                  overflow: "hidden",
+                  boxShadow: "var(--shadow-md)",
+                  background: "#0f172a",
+                  lineHeight: 0,
+                }}>
+                  <video
+                    ref={videoRef}
+                    playsInline
+                    muted
+                    style={{
+                      width: "100%",
+                      display: "block",
+                      transform: "scaleX(-1)",
+                      aspectRatio: "16/9",
+                      objectFit: "cover",
+                    }}
+                  />
+                </div>
+
+                {/* Record + Clear buttons */}
+                <div style={{ display: "flex", gap: 10 }}>
+                  <Button
+                    variant={isRecording ? "danger" : "primary"}
+                    onClick={isRecording ? stopRecording : startRecording}
+                    style={{ flex: 1, padding: "11px 0" }}
+                  >
+                    {isRecording ? "⏹ Stop & Summarize" : "⏺ Start Recording"}
+                  </Button>
+                  <Button variant="ghost" onClick={clearTranscript}>Clear</Button>
+                </div>
+              </div>
+
+              {/* Right panel */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+                {/* AI Feedback card */}
+                <div
                   style={{
-                    marginLeft: "auto",
-                    background: feedbackLoading ? "#f1f5f9" : "#3b5bdb",
-                    color: feedbackLoading ? "#94a3b8" : "#fff",
-                    border: "none", borderRadius: 8, padding: "5px 12px",
-                    fontSize: 12, fontWeight: 700, cursor: feedbackLoading ? "not-allowed" : "pointer",
+                    borderRadius: "var(--radius-lg)",
+                    border: `1.5px solid ${fs ? fs.pill : "var(--border-light)"}`,
+                    background: fs ? fs.bg : "var(--surface)",
+                    padding: "20px",
+                    boxShadow: "var(--shadow-sm)",
+                    transition: "background 0.5s, border-color 0.5s",
+                    minHeight: 128,
                   }}
                 >
-                  {feedbackLoading ? "Analyzing…" : "Ask Coach"}
-                </button>
-              </div>
-
-              {feedbackError && (
-                <p style={{ margin: "0 0 8px", fontSize: 12, color: "#dc2626", background: "#fee2e2", borderRadius: 8, padding: "6px 10px" }}>
-                  ⚠ {feedbackError}
-                </p>
-              )}
-              <p style={{ margin: 0, fontSize: 20, fontWeight: 800, lineHeight: 1.3, color: fs ? fs.accent : "#94a3b8", transition: "color 0.5s" }}>
-                {feedback ? feedback.feedback : status === "live" ? "Press Ask Coach for feedback" : "Waiting for camera…"}
-              </p>
-              {feedback?.reason && (
-                <p style={{ margin: "10px 0 0", fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>{feedback.reason}</p>
-              )}
-            </div>
-
-            {/* Metrics */}
-            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "16px 20px" }}>
-              <p style={{ margin: "0 0 14px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>Metrics</p>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 20px" }}>
-                {[
-                  { label: "WPM", display: String(wpm), bar: clamp01(wpm / 180), color: "#3b82f6" },
-                  { label: "Fillers", display: String(fillerCount), bar: clamp01(fillerCount / 10), color: "#f59e0b" },
-                  { label: "Gesture", display: gestureEnergy.toFixed(2), bar: gestureEnergy, color: "#10b981" },
-                  { label: "Posture", display: postureScore.toFixed(2), bar: postureScore, color: "#6366f1" },
-                  { label: "Energy", display: energyScore.toFixed(2), bar: energyScore, color: "#8b5cf6" },
-                  { label: "Variation", display: variationScore.toFixed(2), bar: variationScore, color: "#06b6d4" },
-                  { label: "Volume", display: volumeLevel.toFixed(2), bar: volumeLevel, color: "#ec4899" },
-                ].map(({ label, display, bar, color }) => (
-                  <div key={label}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span style={{ color: "#64748b" }}>{label}</span>
-                      <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{display}</span>
-                    </div>
-                    <ScoreBar value={bar} color={color} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>
+                      AI Coach
+                    </span>
+                    {feedback && fs && (
+                      <span style={{
+                        background: fs.pill,
+                        color: fs.accent,
+                        borderRadius: "var(--radius-pill)",
+                        padding: "2px 10px",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                      }}>
+                        {FOCUS_ICONS[feedback.focus]} {feedback.focus}
+                      </span>
+                    )}
+                    <Button
+                      variant={feedbackLoading ? "ghost" : "primary"}
+                      size="sm"
+                      onClick={askCoach}
+                      disabled={feedbackLoading}
+                      style={{ marginLeft: "auto", padding: "5px 14px", fontSize: 12 }}
+                    >
+                      {feedbackLoading ? "Analyzing…" : "Ask Coach"}
+                    </Button>
                   </div>
-                ))}
+
+                  {feedbackError && (
+                    <p style={{
+                      margin: "0 0 10px",
+                      fontSize: 12,
+                      color: "#dc2626",
+                      background: "#fee2e2",
+                      borderRadius: "var(--radius-xs)",
+                      padding: "7px 12px",
+                    }}>
+                      ⚠ {feedbackError}
+                    </p>
+                  )}
+                  <p style={{
+                    margin: 0,
+                    fontSize: 19,
+                    fontWeight: 800,
+                    lineHeight: 1.35,
+                    color: fs ? fs.accent : "var(--text-subtle)",
+                    transition: "color 0.5s",
+                  }}>
+                    {feedback ? feedback.feedback : status === "live" ? "Press Ask Coach for feedback" : "Waiting for camera…"}
+                  </p>
+                  {feedback?.reason && (
+                    <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.55 }}>
+                      {feedback.reason}
+                    </p>
+                  )}
+                </div>
+
+                {/* Metrics card */}
+                <Card style={{ padding: "18px 20px" }}>
+                  <p style={{ margin: "0 0 14px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>
+                    Live Metrics
+                  </p>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "13px 22px" }}>
+                    {[
+                      { label: "WPM",       display: String(wpm),                  bar: clamp01(wpm / 180),  color: "#3b82f6" },
+                      { label: "Fillers",   display: String(fillerCount),          bar: clamp01(fillerCount / 10), color: "#f59e0b" },
+                      { label: "Gesture",   display: gestureEnergy.toFixed(2),    bar: gestureEnergy,        color: "#10b981" },
+                      { label: "Posture",   display: postureScore.toFixed(2),     bar: postureScore,         color: "#7c6ff7" },
+                      { label: "Energy",    display: energyScore.toFixed(2),      bar: energyScore,          color: "#8b5cf6" },
+                      { label: "Variation", display: variationScore.toFixed(2),   bar: variationScore,       color: "#06b6d4" },
+                      { label: "Volume",    display: volumeLevel.toFixed(2),      bar: volumeLevel,          color: "#ec4899" },
+                    ].map(({ label, display, bar, color }) => (
+                      <div key={label}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                          <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>{label}</span>
+                          <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: "var(--text)" }}>{display}</span>
+                        </div>
+                        <ScoreBar value={bar} color={color} />
+                      </div>
+                    ))}
+                  </div>
+                </Card>
               </div>
             </div>
+
+            {/* Transcripts */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {[
+                { label: "Recent", text: recentTranscript },
+                { label: "Full Transcript", text: transcript },
+              ].map(({ label, text }) => (
+                <Card key={label} style={{ padding: "16px 18px" }}>
+                  <p style={{ margin: "0 0 10px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>
+                    {label}
+                  </p>
+                  <div style={{
+                    fontSize: 13,
+                    color: text ? "var(--text)" : "var(--text-subtle)",
+                    lineHeight: 1.65,
+                    maxHeight: 110,
+                    overflow: "auto",
+                    whiteSpace: "pre-wrap",
+                  }}>
+                    {text || "(waiting…)"}
+                  </div>
+                </Card>
+              ))}
+            </div>
+
           </div>
-        </div>
-
-        {/* Transcripts */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 16 }}>
-          {[
-            { label: "Recent transcript", text: recentTranscript },
-            { label: "Full transcript", text: transcript },
-          ].map(({ label, text }) => (
-            <div key={label} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: "14px 16px" }}>
-              <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>{label}</p>
-              <div style={{ fontSize: 13, color: text ? "#0d1117" : "#cbd5e1", lineHeight: 1.6, maxHeight: 120, overflow: "auto", whiteSpace: "pre-wrap" }}>
-                {text || "(waiting…)"}
-              </div>
-            </div>
-          ))}
-        </div>
-
       </div>
     </div>
   );
