@@ -247,11 +247,11 @@ export default function PracticePage() {
         // Heavy smoothing — values drift slowly so the display is readable
         const speaking = rawLevel > 0.04;
         sustainedVolumeRef.current = speaking
-          ? clamp01(sustainedVolumeRef.current * 0.92 + rawLevel * 0.08)
-          : clamp01(sustainedVolumeRef.current * 0.97);
+          ? clamp01(sustainedVolumeRef.current * 0.96 + rawLevel * 0.04)
+          : clamp01(sustainedVolumeRef.current * 0.985);
         sustainedEnergyRef.current = speaking
-          ? clamp01(sustainedEnergyRef.current * 0.90 + rawLevel * 0.10)
-          : clamp01(sustainedEnergyRef.current * 0.97);
+          ? clamp01(sustainedEnergyRef.current * 0.95 + rawLevel * 0.05)
+          : clamp01(sustainedEnergyRef.current * 0.985);
         setVolumeLevel(sustainedVolumeRef.current);
         setEnergyScore(sustainedEnergyRef.current);
         const hist = volumeHistoryRef.current;
@@ -260,9 +260,11 @@ export default function PracticePage() {
         // Variation: update every 30 frames (~500 ms) over a wider window
         variationFrameRef.current++;
         if (variationFrameRef.current % 30 === 0 && hist.length >= 20) {
-          const recent = hist.slice(-120);
-          const hi = Math.max(...recent), lo = Math.min(...recent);
-          setVariationScore(clamp01((hi - lo) * 6));
+          const speaking = hist.slice(-120).filter(v => v > 0.04);
+          if (speaking.length > 5) {
+            const hi = Math.max(...speaking), lo = Math.min(...speaking);
+            setVariationScore(clamp01((hi - lo) * 2));
+          }
         }
       }
       audioRafRef.current = requestAnimationFrame(tick);
@@ -343,20 +345,25 @@ export default function PracticePage() {
         const t = now, res = pose.detectForVideo(video, t), lm = res.landmarks?.[0];
         if (lm) {
           const lw = lm[15], rw = lm[16], ls = lm[11], rs = lm[12], nose = lm[0];
-          const vis = [lw, rw, ls, rs].every(p => (p?.visibility ?? 0) > 0.4);
-          if (vis) {
+          // Gesture: requires wrists + shoulders visible
+          const handsVis = [lw, rw, ls, rs].every(p => (p?.visibility ?? 0) > 0.4);
+          if (handsVis) {
             const last = lastHandsRef.current;
             if (last) {
               const dt = (t - last.t) / 1000;
               if (dt > 0) {
                 const raw = clamp01((Math.hypot(lw.x - last.lx, lw.y - last.ly) + Math.hypot(rw.x - last.rx, rw.y - last.ry)) / dt / 2.2);
-                gestureSmoothedRef.current = clamp01(gestureSmoothedRef.current * 0.80 + raw * 0.20);
+                gestureSmoothedRef.current = clamp01(gestureSmoothedRef.current * 0.55 + raw * 0.45);
                 setGestureEnergy(gestureSmoothedRef.current);
               }
             }
             lastHandsRef.current = { t, lx: lw.x, ly: lw.y, rx: rw.x, ry: rw.y };
+          }
+          // Posture: only needs shoulders + nose — updates independently of hands
+          const postureVis = [ls, rs, nose].every(p => (p?.visibility ?? 0) > 0.3);
+          if (postureVis) {
             const rawPosture = clamp01(0.65 * clamp01(1 - Math.abs(ls.y - rs.y) * 10) + 0.35 * (nose.y < (ls.y + rs.y) / 2 ? 1 : 0.4));
-            postureSmoothedRef.current = clamp01(postureSmoothedRef.current * 0.85 + rawPosture * 0.15);
+            postureSmoothedRef.current = clamp01(postureSmoothedRef.current * 0.60 + rawPosture * 0.40);
             setPostureScore(postureSmoothedRef.current);
           }
         }
