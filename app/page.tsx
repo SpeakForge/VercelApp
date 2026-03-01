@@ -10,12 +10,12 @@ import "./sf-card.css";
 /* ── Static data ─────────────────────────────────────────── */
 
 const FEATURES = [
-  { gradient: "linear-gradient(43deg, #4158D0 0%, #C850C0 46%, #FFCC70 100%)", title: "Pace & WPM",     desc: "Live words-per-minute tracking keeps your delivery in the ideal 130–160 WPM range." },
-  { gradient: "linear-gradient(43deg, #FF512F 0%, #F09819 100%)",               title: "Filler Words",    desc: "Counts every \"um\", \"uh\", and \"like\" in real time so you can catch and cut them." },
-  { gradient: "linear-gradient(43deg, #0BAB64 0%, #3BB78F 50%, #74EBD5 100%)", title: "Gesture Energy",  desc: "MediaPipe tracks wrist movement to score how expressive your gestures are." },
-  { gradient: "linear-gradient(43deg, #7F00FF 0%, #A855F7 50%, #E879F9 100%)", title: "Posture Score",   desc: "Shoulder tilt and head position analysed so you always look poised and confident." },
-  { gradient: "linear-gradient(43deg, #0F7B6C 0%, #0891B2 50%, #67E8F9 100%)", title: "Volume & Energy", desc: "Real-time RMS energy meter ensures your voice stays loud, clear, and engaging." },
-  { gradient: "linear-gradient(43deg, #BE185D 0%, #EC4899 50%, #FDA4AF 100%)", title: "Vocal Variation", desc: "Detects monotone delivery and nudges you to vary your pitch and dynamics." },
+  { gradient: "linear-gradient(135deg, #1a2428 0%, #243137 100%)", title: "Pace & WPM",     desc: "Live words-per-minute tracking keeps your delivery in the ideal 130–160 WPM range." },
+  { gradient: "linear-gradient(135deg, #2a2018 0%, #3d2e1a 100%)", title: "Filler Words",    desc: "Counts every \"um\", \"uh\", and \"like\" in real time so you can catch and cut them." },
+  { gradient: "linear-gradient(135deg, #1c2d2a 0%, #243137 100%)", title: "Gesture Energy",  desc: "MediaPipe tracks wrist movement to score how expressive your gestures are." },
+  { gradient: "linear-gradient(135deg, #1e2535 0%, #243137 100%)", title: "Posture Score",   desc: "Shoulder tilt and head position analysed so you always look poised and confident." },
+  { gradient: "linear-gradient(135deg, #243137 0%, #1a2428 100%)", title: "Volume & Energy", desc: "Real-time RMS energy meter ensures your voice stays loud, clear, and engaging." },
+  { gradient: "linear-gradient(135deg, #282020 0%, #3a2530 100%)", title: "Vocal Variation", desc: "Detects monotone delivery and nudges you to vary your pitch and dynamics." },
 ];
 
 /* ── Floater styles ─────────────────────────────────────── */
@@ -128,8 +128,9 @@ function FeatureDeck() {
           className="feature-card"
           style={{ backgroundImage: f.gradient }}
         >
+          <div style={{ position: "absolute", top: 0, left: "20%", right: "20%", height: 2, background: "#bd9f67", borderRadius: "0 0 2px 2px", zIndex: 3, opacity: 0.85 }} />
           <div className="feature-card-content">
-            <div className="feature-card-title">{f.title}</div>
+            <div className="feature-card-title" style={{ color: "#bd9f67" }}>{f.title}</div>
             <p className="feature-card-para">{f.desc}</p>
           </div>
         </div>
@@ -201,9 +202,9 @@ export default function HomePage() {
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
                 <div style={{
                   width: 44, height: 44, borderRadius: 14,
-                  background: "rgba(124,111,247,0.12)",
+                  background: "var(--gold-light)",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 13, fontWeight: 800, color: "#7c6ff7", letterSpacing: "-0.5px",
+                  fontSize: 13, fontWeight: 800, color: "var(--gold)", letterSpacing: "-0.5px",
                 }}>REC</div>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.3px" }}>Recording</div>
@@ -215,7 +216,7 @@ export default function HomePage() {
               </div>
               <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 28 }}>
                 {[14, 22, 18, 28, 12, 24, 20, 28, 16, 22, 10, 26, 18, 22, 14].map((h, i) => (
-                  <div key={i} style={{ flex: 1, height: h, borderRadius: 3, background: `rgba(124,111,247,${0.3 + (i % 4) * 0.15})` }} />
+                  <div key={i} style={{ flex: 1, height: h, borderRadius: 3, background: `rgba(189,159,103,${0.3 + (i % 4) * 0.18})` }} />
                 ))}
               </div>
             </div>
@@ -228,10 +229,10 @@ export default function HomePage() {
                 Filler Words
               </div>
               {[
-                { word: '"um"',       count: 3, color: "#f59e0b" },
-                { word: '"uh"',       count: 1, color: "#f97316" },
-                { word: '"like"',     count: 5, color: "#ef4444" },
-                { word: '"you know"', count: 2, color: "#8b5cf6" },
+                { word: '"um"',       count: 3, color: "#bd9f67" },
+                { word: '"uh"',       count: 1, color: "#a08050" },
+                { word: '"like"',     count: 5, color: "#d4b483" },
+                { word: '"you know"', count: 2, color: "#8b6940" },
               ].map(({ word, count, color }) => (
                 <div key={word} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
                   <span style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>{word}</span>
@@ -252,7 +253,7 @@ export default function HomePage() {
                 <span style={{ color: "var(--text)", fontWeight: 600 }}>significantly improve</span>{" "}
                 the outcome—"
               </p>
-              <span style={{ display: "inline-block", width: 2, height: 14, background: "#7c6ff7", marginTop: 4, animation: "wavePulse 0.8s ease-in-out infinite" }} />
+              <span style={{ display: "inline-block", width: 2, height: 14, background: "var(--gold)", marginTop: 4, animation: "wavePulse 0.8s ease-in-out infinite" }} />
             </div>
           </div>
 
@@ -267,13 +268,13 @@ export default function HomePage() {
               <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--text-subtle)", marginBottom: 8 }}>
                 Words / Min
               </div>
-              <div style={{ fontSize: 62, fontWeight: 900, letterSpacing: "-3px", color: "var(--text)", lineHeight: 1 }}>
+              <div className="hero-value-pulse" style={{ fontSize: 62, fontWeight: 900, letterSpacing: "-3px", color: "var(--text)", lineHeight: 1 }}>
                 142
               </div>
               <div style={{ marginTop: 10, height: 5, background: "rgba(0,0,0,0.06)", borderRadius: 99 }}>
-                <div style={{ width: "79%", height: "100%", background: "#3b82f6", borderRadius: 99 }} />
+                <div className="hero-bar-wpm" style={{ height: "100%", background: "var(--gold)", borderRadius: 99 }} />
               </div>
-              <div style={{ marginTop: 6, fontSize: 11, color: "#3b82f6", fontWeight: 600 }}>Good pace</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "var(--gold)", fontWeight: 600 }}>Good pace</div>
             </div>
           </div>
 
@@ -283,9 +284,9 @@ export default function HomePage() {
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                 <div style={{
                   width: 32, height: 32, borderRadius: "50%",
-                  background: "linear-gradient(135deg, #7c6ff7, #a78bfa)",
+                  background: "var(--dark)",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 11, fontWeight: 800, color: "#fff", letterSpacing: "-0.3px",
+                  fontSize: 11, fontWeight: 800, color: "var(--gold)", letterSpacing: "-0.3px",
                 }}>AI</div>
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>AI Coach</div>
@@ -305,17 +306,17 @@ export default function HomePage() {
                 Body Language
               </div>
               {[
-                { label: "Posture",   value: 0.87, color: "#7c6ff7" },
-                { label: "Gestures",  value: 0.74, color: "#10b981" },
-                { label: "Eye Level", value: 0.92, color: "#3b82f6" },
-              ].map(({ label, value, color }) => (
+                { label: "Posture",   value: 0.87, color: "#bd9f67", barClass: "hero-bar-posture" },
+                { label: "Gestures",  value: 0.74, color: "#a08050", barClass: "hero-bar-gestures" },
+                { label: "Eye Level", value: 0.92, color: "#d4b483", barClass: "hero-bar-eye" },
+              ].map(({ label, value, color, barClass }) => (
                 <div key={label} style={{ marginBottom: 9 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 12 }}>
                     <span style={{ color: "var(--text-muted)" }}>{label}</span>
-                    <span style={{ fontWeight: 700, color: "var(--text)" }}>{Math.round(value * 100)}%</span>
+                    <span className="hero-value-pulse" style={{ fontWeight: 700, color: "var(--text)" }}>{Math.round(value * 100)}%</span>
                   </div>
                   <div style={{ height: 4, background: "rgba(0,0,0,0.06)", borderRadius: 99 }}>
-                    <div style={{ width: `${value * 100}%`, height: "100%", background: color, borderRadius: 99 }} />
+                    <div className={barClass} style={{ height: "100%", background: color, borderRadius: 99 }} />
                   </div>
                 </div>
               ))}
@@ -331,11 +332,11 @@ export default function HomePage() {
       {/* ═══ HOW IT WORKS — blur-sibling hover ═══ */}
       <section id="how" style={{ maxWidth: 1100, margin: "0 auto", padding: "100px 40px 0" }}>
         <ScrollReveal>
-          <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--text-subtle)", marginBottom: 12 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--gold)", marginBottom: 12 }}>
             How it works
           </p>
           <h2 style={{ fontSize: "clamp(28px, 3.5vw, 46px)", fontWeight: 900, letterSpacing: "-2px", margin: "0 0 52px", lineHeight: 1.07, color: "var(--text)", maxWidth: 680 }}>
-            Your path to becoming a better speaker starts with three simple steps.
+            Your path to becoming a <span style={{ color: "var(--gold)" }}>better speaker</span> starts with three simple steps.
           </h2>
         </ScrollReveal>
 
@@ -343,30 +344,30 @@ export default function HomePage() {
         <div className="step-cards">
 
           {/* Step 01 */}
-          <div className="step-card" style={{ background: "#1e3a5f" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", letterSpacing: "0.07em", marginBottom: 20 }}>01</div>
+          <div className="step-card" style={{ background: "#243137" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gold)", letterSpacing: "0.07em", marginBottom: 20 }}>01</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, color: "#fff", letterSpacing: "-0.4px" }}>Allow Camera &amp; Mic</div>
-            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.65)", lineHeight: 1.65 }}>
+            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.60)", lineHeight: 1.65 }}>
               Grant permission once — no downloads, no accounts needed.
             </div>
             <PreviewPermission />
           </div>
 
           {/* Step 02 */}
-          <div className="step-card" style={{ background: "#3b0764" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", letterSpacing: "0.07em", marginBottom: 20 }}>02</div>
+          <div className="step-card" style={{ background: "#1a2428" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gold)", letterSpacing: "0.07em", marginBottom: 20 }}>02</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, color: "#fff", letterSpacing: "-0.4px" }}>Start Speaking</div>
-            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.65)", lineHeight: 1.65 }}>
+            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.60)", lineHeight: 1.65 }}>
               SpeakForge immediately analyses your voice and body language.
             </div>
             <PreviewWaveform />
           </div>
 
           {/* Step 03 */}
-          <div className="step-card" style={{ background: "#064e3b" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", letterSpacing: "0.07em", marginBottom: 20 }}>03</div>
+          <div className="step-card" style={{ background: "#2e3d44" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gold)", letterSpacing: "0.07em", marginBottom: 20 }}>03</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, color: "#fff", letterSpacing: "-0.4px" }}>Read Your Live Score</div>
-            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.65)", lineHeight: 1.65 }}>
+            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.60)", lineHeight: 1.65 }}>
               Watch WPM, posture, gestures, and fillers update in real time.
             </div>
             <PreviewScores />
@@ -378,11 +379,11 @@ export default function HomePage() {
       {/* ═══ FEATURES ═══ */}
       <section id="features" style={{ maxWidth: 1100, margin: "0 auto", padding: "100px 40px 0" }}>
         <ScrollReveal>
-          <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--text-subtle)", marginBottom: 12 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--gold)", marginBottom: 12 }}>
             What we track
           </p>
           <h2 style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 900, letterSpacing: "-2.5px", margin: "0 0 52px", lineHeight: 1.02, color: "var(--text)" }}>
-            Every dimension of your delivery.
+            Every dimension of your <span style={{ color: "var(--gold)" }}>delivery</span>.
           </h2>
         </ScrollReveal>
 
@@ -398,24 +399,24 @@ export default function HomePage() {
             glass={false}
             style={{
               padding: "72px 56px",
-              background: "rgba(0,0,0,0.88)",
-              border: "none",
-              boxShadow: "0 20px 60px rgba(0,0,0,0.20)",
+              background: "var(--dark)",
+              border: "1px solid rgba(189,159,103,0.15)",
+              boxShadow: "0 20px 60px rgba(36,49,55,0.30)",
               textAlign: "center",
             }}
           >
             <h2 style={{ fontSize: "clamp(28px, 4vw, 52px)", fontWeight: 900, letterSpacing: "-2.5px", margin: "0 0 14px", color: "#fff", lineHeight: 1.02 }}>
-              Ready to become a better speaker?
+              Ready to become a <span style={{ color: "var(--gold)" }}>better speaker</span>?
             </h2>
-            <p style={{ fontSize: 16, color: "rgba(255,255,255,0.6)", margin: "0 0 36px", letterSpacing: "-0.2px" }}>
+            <p style={{ fontSize: 16, color: "rgba(255,255,255,0.5)", margin: "0 0 36px", letterSpacing: "-0.2px" }}>
               No sign-up, no download. Just open the coach and start speaking.
             </p>
             <Link href="/coach">
               <button
                 className="btn-primary"
                 style={{
-                  background: "#fff",
-                  color: "rgba(0,0,0,0.9)",
+                  background: "var(--gold)",
+                  color: "var(--dark)",
                   border: "none",
                   borderRadius: "var(--radius-pill)",
                   padding: "15px 44px",
@@ -434,8 +435,8 @@ export default function HomePage() {
 
       {/* ═══ FOOTER ═══ */}
       <footer style={{ borderTop: "1px solid var(--border-light)", padding: "24px 40px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", letterSpacing: "-0.3px" }}>
-          <span style={{ opacity: 0.35, fontWeight: 400 }}>speak</span>forge
+        <span style={{ fontSize: 14, letterSpacing: "-0.3px" }}>
+          <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>speak</span><span style={{ fontWeight: 700, color: "var(--gold)" }}>forge</span>
         </span>
         <span style={{ fontSize: 13, color: "var(--text-subtle)" }}>2025 SpeakForge · HackTCNJ 2026</span>
       </footer>

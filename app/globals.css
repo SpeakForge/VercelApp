@@ -2,36 +2,58 @@
 
 /* ── Design tokens ──────────────────────────────────────────── */
 :root {
+  /* ── Palette ── */
   --bg:            #f6f5f2;
-  --surface:       rgba(255, 255, 255, 0.82);
+  --surface:       rgba(255, 255, 255, 0.88);
   --surface-solid: #ffffff;
-  --surface2:      rgba(248, 248, 246, 0.9);
-  --accent:        #004370;
-  --accent-light:  rgba(0, 67, 112, 0.09);
-  --accent-glow:   rgba(0, 67, 112, 0.18);
+  --surface2:      rgba(248, 247, 244, 0.9);
+
+  /* Gold accent — from the animated logo */
+  --gold:          #bd9f67;
+  --gold-light:    rgba(189, 159, 103, 0.10);
+  --gold-glow:     rgba(189, 159, 103, 0.22);
+  --gold-border:   rgba(189, 159, 103, 0.30);
+
+  /* Dark — logo streak background */
+  --dark:          #243137;
+  --dark-muted:    rgba(36, 49, 55, 0.82);
+
+  /* Aliases for backward-compat */
+  --accent:        #bd9f67;
+  --accent-light:  rgba(189, 159, 103, 0.10);
+  --accent-glow:   rgba(189, 159, 103, 0.22);
   --purple:        #7c6ff7;
   --purple-light:  #ede9fe;
-  --text:          rgba(0, 0, 0, 0.88);
-  --text-muted:    #666666;
-  --text-subtle:   #999999;
-  --border:        rgba(0, 0, 0, 0.10);
-  --border-light:  rgba(0, 0, 0, 0.06);
+
+  /* Typography */
+  --text:          #1c282d;
+  --text-muted:    #5a6b72;
+  --text-subtle:   #8a9ca3;
+
+  /* Borders */
+  --border:        rgba(0, 0, 0, 0.09);
+  --border-light:  rgba(0, 0, 0, 0.05);
   --border-glass:  rgba(255, 255, 255, 0.7);
+
+  /* Radii */
   --radius-xs:     8px;
   --radius-sm:     12px;
   --radius-md:     16px;
   --radius-lg:     20px;
   --radius-xl:     24px;
   --radius-pill:   999px;
-  --shadow-glass:  0 0 0 1px rgba(0,0,0,0.06), 0 4px 24px rgba(0,0,0,0.07);
+
+  /* Shadows */
+  --shadow-glass:    0 0 0 1px rgba(0,0,0,0.06), 0 4px 24px rgba(0,0,0,0.07);
   --shadow-glass-lg: 0 0 0 1px rgba(0,0,0,0.05), 0 12px 48px rgba(0,0,0,0.10);
-  --shadow-xs:     0 1px 4px rgba(0,0,0,0.05);
-  --shadow-sm:     0 2px 12px rgba(0,0,0,0.07);
-  --shadow-md:     0 4px 24px rgba(0,0,0,0.09);
-  --shadow-hover:  0 14px 48px rgba(0,0,0,0.14);
+  --shadow-xs:       0 1px 4px rgba(0,0,0,0.05);
+  --shadow-sm:       0 2px 12px rgba(0,0,0,0.07);
+  --shadow-md:       0 4px 24px rgba(0,0,0,0.09);
+  --shadow-hover:    0 14px 48px rgba(0,0,0,0.14);
+
   --header-h:      60px;
   --background:    #f6f5f2;
-  --foreground:    rgba(0,0,0,0.88);
+  --foreground:    #1c282d;
 }
 
 /* ── Base ──────────────────────────────────────────────────── */
@@ -137,9 +159,9 @@ body {
 .btn-primary:active { opacity: 1;    transform: scale(0.97); }
 
 .btn-ghost {
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
-.btn-ghost:hover { background: rgba(0,0,0,0.06) !important; }
+.btn-ghost:hover { background: var(--gold-light) !important; border-color: var(--gold-border) !important; }
 
 /* ── Nav link ───────────────────────────────────────────────── */
 .nav-link-item { transition: color 0.15s ease; }
@@ -296,6 +318,80 @@ body {
   margin: 0;
 }
 
+
+/* ── 3D Page Transition Spinner ─────────────────────────────── */
+.spinner {
+  width: 70.4px;
+  height: 70.4px;
+  --clr: #bd9f67;
+  --clr-alpha: rgba(189, 159, 103, 0.1);
+  animation: spinner 2.8s infinite ease;
+  transform-style: preserve-3d;
+}
+
+.spinner > div {
+  background-color: var(--clr-alpha);
+  height: 100%;
+  position: absolute;
+  width: 100%;
+  border: 3.5px solid var(--clr);
+}
+
+.spinner div:nth-of-type(1) { transform: translateZ(-35.2px) rotateY(180deg); }
+.spinner div:nth-of-type(2) { transform: rotateY(-270deg) translateX(50%); transform-origin: top right; }
+.spinner div:nth-of-type(3) { transform: rotateY(270deg) translateX(-50%); transform-origin: center left; }
+.spinner div:nth-of-type(4) { transform: rotateX(90deg) translateY(-50%); transform-origin: top center; }
+.spinner div:nth-of-type(5) { transform: rotateX(-90deg) translateY(50%); transform-origin: bottom center; }
+.spinner div:nth-of-type(6) { transform: translateZ(35.2px); }
+
+@keyframes spinner {
+  0%   { transform: rotate(45deg) rotateX(-25deg) rotateY(25deg); }
+  50%  { transform: rotate(45deg) rotateX(-385deg) rotateY(25deg); }
+  100% { transform: rotate(45deg) rotateX(-385deg) rotateY(385deg); }
+}
+
+.page-loader-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* opacity controlled via JS for enter/exit transitions */
+}
+
+/* ── Hero widget animations ──────────────────────────────────── */
+@keyframes heroBarWpm {
+  0%, 100% { width: 71%; }
+  35%      { width: 82%; }
+  65%      { width: 74%; }
+}
+@keyframes heroBarPosture {
+  0%, 100% { width: 87%; }
+  40%      { width: 93%; }
+  70%      { width: 83%; }
+}
+@keyframes heroBarGestures {
+  0%, 100% { width: 74%; }
+  30%      { width: 64%; }
+  65%      { width: 81%; }
+}
+@keyframes heroBarEye {
+  0%, 100% { width: 92%; }
+  45%      { width: 97%; }
+  75%      { width: 87%; }
+}
+@keyframes heroValuePulse {
+  0%, 100% { opacity: 1;    }
+  50%       { opacity: 0.65; }
+}
+
+.hero-bar-wpm      { width: 71%; animation: heroBarWpm      4s ease-in-out infinite; }
+.hero-bar-posture  { width: 87%; animation: heroBarPosture  5s ease-in-out infinite; }
+.hero-bar-gestures { width: 74%; animation: heroBarGestures 4.5s ease-in-out infinite; }
+.hero-bar-eye      { width: 92%; animation: heroBarEye      3.8s ease-in-out infinite; }
+.hero-value-pulse  { animation: heroValuePulse 3s ease-in-out infinite; }
 
 /* ── Responsive ─────────────────────────────────────────────── */
 @media (max-width: 809px) {

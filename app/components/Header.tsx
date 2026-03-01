@@ -108,7 +108,7 @@ export default function Header({ title, subtitle, badge, right }: HeaderProps) {
           boxShadow: "0 0 0 2px var(--border-light)",
         }}
       >
-        🧑
+        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)" }}>U</span>
       </div>
     </header>
   );

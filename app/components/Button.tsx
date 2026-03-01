@@ -13,16 +13,14 @@ interface ButtonProps {
 
 const VARIANT_STYLES: Record<string, CSSProperties> = {
   primary: {
-    background: "var(--accent)",
+    background: "var(--dark)",
     color: "#fff",
     border: "none",
   },
   ghost: {
-    background: "rgba(255,255,255,0.55)",
-    color: "var(--text-muted)",
-    border: "1px solid rgba(30,45,82,0.14)",
-    backdropFilter: "blur(4px)",
-    WebkitBackdropFilter: "blur(4px)",
+    background: "transparent",
+    color: "var(--text)",
+    border: "1px solid var(--border)",
   },
   danger: {
     background: "#fee2e2",

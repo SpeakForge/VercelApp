@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
+import Navbar from "../components/Navbar";
+import Card from "../components/Card";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,9 +40,9 @@ const FOCUS_STYLES: Record<FocusType, { bg: string; accent: string; pill: string
   content:   { bg: "#fdf2f8", accent: "#9d174d", pill: "#fbcfe8" },
 };
 
-const FOCUS_ICONS: Record<FocusType, string> = {
-  pace: "⏱️", fillers: "🤐", energy: "⚡", variation: "🎵",
-  gestures: "🙌", posture: "🧍", content: "📋",
+const FOCUS_LABELS: Record<FocusType, string> = {
+  pace: "Pace", fillers: "Fillers", energy: "Energy", variation: "Variation",
+  gestures: "Gestures", posture: "Posture", content: "Content",
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -65,8 +67,8 @@ function avg(arr: number[]) { return arr.length ? arr.reduce((a, b) => a + b, 0)
 
 function ScoreBar({ value, color = "#6d28d9" }: { value: number; color?: string }) {
   return (
-    <div style={{ height: 6, background: "#f1f5f9", borderRadius: 99, overflow: "hidden", marginTop: 4 }}>
-      <div style={{ height: "100%", width: `${Math.round(value * 100)}%`, background: color, borderRadius: 99, transition: "width 0.4s ease" }} />
+    <div style={{ height: 6, background: "var(--border-light)", borderRadius: 99, overflow: "hidden", marginTop: 4 }}>
+      <div style={{ height: "100%", width: `${Math.round(value * 100)}%`, background: color, borderRadius: 99, transition: "width 1.2s ease" }} />
     </div>
   );
 }
@@ -82,6 +84,9 @@ export default function PracticePage() {
   const rafRef = useRef<number | null>(null);
   const lastHandsRef = useRef<{ t: number; lx: number; ly: number; rx: number; ry: number } | null>(null);
   const lastPoseTimeRef = useRef(0);
+  const gestureSmoothedRef = useRef(0);
+  const postureSmoothedRef = useRef(0);
+  const variationFrameRef = useRef(0);
 
   // Audio refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -130,6 +135,7 @@ export default function PracticePage() {
   const metricsRef = useRef<MetricsSnapshot>({ wpm: 0, fillerCount: 0, gestureEnergy: 0, postureScore: 0, volumeLevel: 0, energyScore: 0, variationScore: 0 });
   const transcriptRef = useRef("");
   const recentTranscriptRef = useRef("");
+  const userEmailRef = useRef<string>("anonymous");
 
   useEffect(() => {
     metricsRef.current = { wpm, fillerCount, gestureEnergy, postureScore, volumeLevel, energyScore, variationScore };
@@ -147,7 +153,8 @@ export default function PracticePage() {
 
   // Load user + generate practice session on mount
   const loadPracticeSession = (forceRefresh = false) => {
-    const CACHE_KEY = "speakforge_practice_session";
+    // Key is scoped per user so switching accounts never shows another user's session
+    const CACHE_KEY = `speakforge_practice_session_${userEmailRef.current}`;
     const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
     if (!forceRefresh) {
@@ -165,22 +172,27 @@ export default function PracticePage() {
     }
 
     setPhase("loading");
-    fetch("/api/practice/generate")
-      .then(r => r.ok ? r.json() : Promise.reject("Failed to generate"))
-      .then(data => {
+    Promise.all([
+      fetch("/api/practice/generate").then(r => r.ok ? r.json() : Promise.reject("Failed to generate")),
+      new Promise(r => setTimeout(r, 1500)),
+    ])
+      .then(([data]) => {
         try { localStorage.setItem(CACHE_KEY, JSON.stringify({ session: data, generatedAt: Date.now() })); } catch { /* storage full */ }
-        setPracticeSession(data);
+        setPracticeSession(data as typeof data);
         setPhase("listen");
       })
       .catch(() => setGenError("Couldn't generate your practice session. Please try again."));
   };
 
   useEffect(() => {
+    // Fetch user first so the cache key is scoped correctly before loading the session
     fetch("/api/auth/me")
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.name) setUser(d); });
-
-    loadPracticeSession();
+      .then(d => {
+        if (d?.name) setUser(d);
+        if (d?.email) userEmailRef.current = d.email;
+        loadPracticeSession();
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -208,6 +220,18 @@ export default function PracticePage() {
     };
   }, []);
 
+  // Re-attach camera stream whenever the video element re-mounts (after loading/complete screens)
+  useEffect(() => {
+    if (phase === "loading" || phase === "complete") return;
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+      video.play().catch(() => {});
+    }
+  }, [phase]);
+
   // Audio analysis loop
   useEffect(() => {
     const tick = () => {
@@ -217,20 +241,23 @@ export default function PracticePage() {
         let sumSq = 0;
         for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sumSq += v * v; }
         const rawLevel = clamp01(Math.sqrt(sumSq / data.length) * 14);
+        // Heavy smoothing — values drift slowly so the display is readable
         const speaking = rawLevel > 0.04;
         sustainedVolumeRef.current = speaking
-          ? clamp01(sustainedVolumeRef.current * 0.3 + rawLevel * 0.7)
-          : clamp01(sustainedVolumeRef.current * 0.90);
+          ? clamp01(sustainedVolumeRef.current * 0.92 + rawLevel * 0.08)
+          : clamp01(sustainedVolumeRef.current * 0.97);
         sustainedEnergyRef.current = speaking
-          ? clamp01(sustainedEnergyRef.current * 0.4 + rawLevel * 0.6)
-          : clamp01(sustainedEnergyRef.current * 0.93);
+          ? clamp01(sustainedEnergyRef.current * 0.90 + rawLevel * 0.10)
+          : clamp01(sustainedEnergyRef.current * 0.97);
         setVolumeLevel(sustainedVolumeRef.current);
         setEnergyScore(sustainedEnergyRef.current);
         const hist = volumeHistoryRef.current;
         hist.push(rawLevel);
-        if (hist.length > 120) hist.shift();
-        if (hist.length >= 10) {
-          const recent = hist.slice(-40);
+        if (hist.length > 180) hist.shift();
+        // Variation: update every 30 frames (~500 ms) over a wider window
+        variationFrameRef.current++;
+        if (variationFrameRef.current % 30 === 0 && hist.length >= 20) {
+          const recent = hist.slice(-120);
           const hi = Math.max(...recent), lo = Math.min(...recent);
           setVariationScore(clamp01((hi - lo) * 6));
         }
@@ -308,7 +335,7 @@ export default function PracticePage() {
     const loop = () => {
       const video = videoRef.current, pose = poseRef.current;
       const now = performance.now();
-      if (video && pose && video.readyState >= 2 && now - lastPoseTimeRef.current >= 66) {
+      if (video && pose && video.readyState >= 2 && now - lastPoseTimeRef.current >= 200) {
         lastPoseTimeRef.current = now;
         const t = now, res = pose.detectForVideo(video, t), lm = res.landmarks?.[0];
         if (lm) {
@@ -318,12 +345,16 @@ export default function PracticePage() {
             const last = lastHandsRef.current;
             if (last) {
               const dt = (t - last.t) / 1000;
-              if (dt > 0) setGestureEnergy(clamp01(
-                (Math.hypot(lw.x - last.lx, lw.y - last.ly) + Math.hypot(rw.x - last.rx, rw.y - last.ry)) / dt / 2.2
-              ));
+              if (dt > 0) {
+                const raw = clamp01((Math.hypot(lw.x - last.lx, lw.y - last.ly) + Math.hypot(rw.x - last.rx, rw.y - last.ry)) / dt / 2.2);
+                gestureSmoothedRef.current = clamp01(gestureSmoothedRef.current * 0.80 + raw * 0.20);
+                setGestureEnergy(gestureSmoothedRef.current);
+              }
             }
             lastHandsRef.current = { t, lx: lw.x, ly: lw.y, rx: rw.x, ry: rw.y };
-            setPostureScore(clamp01(0.65 * clamp01(1 - Math.abs(ls.y - rs.y) * 10) + 0.35 * (nose.y < (ls.y + rs.y) / 2 ? 1 : 0.4)));
+            const rawPosture = clamp01(0.65 * clamp01(1 - Math.abs(ls.y - rs.y) * 10) + 0.35 * (nose.y < (ls.y + rs.y) / 2 ? 1 : 0.4));
+            postureSmoothedRef.current = clamp01(postureSmoothedRef.current * 0.85 + rawPosture * 0.15);
+            setPostureScore(postureSmoothedRef.current);
           }
         }
       }
@@ -457,18 +488,17 @@ export default function PracticePage() {
 
   if (phase === "loading") {
     return (
-      <div style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-geist-sans), -apple-system, sans-serif", color: "#0d1117" }}>
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
         {genError ? (
           <div style={{ textAlign: "center", maxWidth: 400 }}>
-            <div style={{ fontSize: 36, marginBottom: 16 }}>⚠️</div>
             <p style={{ color: "#dc2626", marginBottom: 20, fontSize: 15 }}>{genError}</p>
-            <button onClick={() => router.push("/")} style={{ background: "#3b5bdb", color: "#fff", border: "none", borderRadius: 10, padding: "10px 24px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>← Back to Home</button>
+            <button onClick={() => router.push("/")} className="btn-ghost" style={{ background: "transparent", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "var(--radius-pill)", padding: "8px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← Back to Home</button>
           </div>
         ) : (
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>🧠</div>
-            <p style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Analyzing your history…</p>
-            <p style={{ fontSize: 14, color: "#94a3b8" }}>Building a personalized practice session just for you</p>
+            <div className="spinner" style={{ margin: "0 auto 28px" }}><div /><div /><div /><div /><div /><div /></div>
+            <p style={{ fontSize: 18, fontWeight: 700, marginBottom: 8, color: "var(--text)" }}>Analyzing your history…</p>
+            <p style={{ fontSize: 14, color: "var(--text-muted)" }}>Building a personalized practice session just for you</p>
           </div>
         )}
       </div>
@@ -481,85 +511,82 @@ export default function PracticePage() {
     const overallWpm = segmentResults.length ? Math.round(avg(segmentResults.map(r => r.wpm))) : 0;
     const overallFillers = segmentResults.reduce((a, r) => a + r.fillerCount, 0);
     const overallEnergy = avg(segmentResults.map(r => r.avgMetrics.energyScore));
-    const overallVolume = avg(segmentResults.map(r => r.avgMetrics.volumeLevel));
 
     return (
-      <div style={{ minHeight: "100vh", background: "#f8fafc", padding: "24px 20px", fontFamily: "var(--font-geist-sans), -apple-system, sans-serif" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto" }}>
+      <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+        <Navbar />
 
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
-            <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.5px" }}>🎙️ SpeakForge</span>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => router.push("/coach")} style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Coach Mode</button>
-              <button onClick={() => router.push("/")} style={{ background: "#3b5bdb", color: "#fff", border: "none", borderRadius: 10, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>← Home</button>
-            </div>
+        {/* Sub-header */}
+        <div style={{ borderBottom: "1px solid var(--border-light)", padding: "16px 40px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(247,250,252,0.8)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", position: "relative", zIndex: 1 }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 900, letterSpacing: "-0.6px", color: "var(--text)" }}>Practice <span style={{ color: "var(--gold)" }}>Complete</span></h1>
+            <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>{practiceSession?.sessionTitle}</p>
           </div>
-
-          {/* Banner */}
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 20, padding: "32px", marginBottom: 16, textAlign: "center" }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>🏆</div>
-            <h2 style={{ fontSize: 24, fontWeight: 900, color: "#0d1117", margin: "0 0 8px", letterSpacing: "-0.5px" }}>Practice Complete!</h2>
-            <p style={{ fontSize: 14, color: "#64748b", margin: "0 0 24px" }}>{practiceSession?.sessionTitle}</p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, maxWidth: 520, margin: "0 auto" }}>
-              {[
-                { label: "Segments", value: String(segmentResults.length), color: "#3b5bdb" },
-                { label: "Avg WPM", value: String(overallWpm), color: "#3b82f6" },
-                { label: "Fillers", value: String(overallFillers), color: "#f59e0b" },
-                { label: "Energy", value: overallEnergy.toFixed(2), color: "#8b5cf6" },
-              ].map(({ label, value, color }) => (
-                <div key={label} style={{ background: "#f8fafc", borderRadius: 12, padding: "14px 10px", border: "1px solid #e2e8f0" }}>
-                  <div style={{ fontSize: 22, fontWeight: 800, color }}>{value}</div>
-                  <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>{label}</div>
-                </div>
-              ))}
-            </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => { setSegmentResults([]); setCurrentSegmentIdx(0); loadPracticeSession(true); }} className="btn-ghost" style={{ background: "transparent", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "var(--radius-pill)", padding: "7px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>New Session</button>
+            <button onClick={() => router.push("/coach")} className="btn-primary" style={{ background: "var(--dark)", color: "#fff", border: "none", borderRadius: "var(--radius-pill)", padding: "7px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Coach Mode</button>
           </div>
+        </div>
 
-          {/* Per-segment results */}
-          <div style={{ marginBottom: 20 }}>
-            <p style={{ margin: "0 0 12px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>Segment Breakdown</p>
-            {segmentResults.map((r, i) => {
-              const s = practiceSession?.segments?.[r.segmentIdx];
-              const sfs = s ? FOCUS_STYLES[s.focus] : null;
-              return (
-                <div key={i} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: "16px 20px", marginBottom: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                    <span style={{ background: sfs?.pill, color: sfs?.accent, borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>
-                      {s ? FOCUS_ICONS[s.focus] : ""} {s?.focus}
-                    </span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#0d1117" }}>{s?.title}</span>
+        <div style={{ padding: "32px 40px 60px", position: "relative", zIndex: 1 }}>
+          <div style={{ maxWidth: 760, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
+
+            {/* Banner */}
+            <Card style={{ textAlign: "center" }}>
+              <h2 style={{ fontSize: 24, fontWeight: 900, color: "var(--text)", margin: "0 0 8px", letterSpacing: "-0.5px" }}>Session <span style={{ color: "var(--gold)" }}>Complete</span></h2>
+              <p style={{ fontSize: 14, color: "var(--text-muted)", margin: "0 0 24px" }}>{practiceSession?.sessionTitle}</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, maxWidth: 520, margin: "0 auto" }}>
+                {[
+                  { label: "Segments", value: String(segmentResults.length), color: "var(--text)" },
+                  { label: "Avg WPM", value: String(overallWpm), color: "#3b82f6" },
+                  { label: "Fillers", value: String(overallFillers), color: "#f59e0b" },
+                  { label: "Energy", value: overallEnergy.toFixed(2), color: "#8b5cf6" },
+                ].map(({ label, value, color }) => (
+                  <div key={label} style={{ background: "var(--bg)", borderRadius: "var(--radius-sm)", padding: "14px 10px", border: "1px solid var(--border-light)" }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color }}>{value}</div>
+                    <div style={{ fontSize: 10, color: "var(--text-subtle)", marginTop: 2 }}>{label}</div>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
-                    {[
-                      { label: "WPM", value: String(r.wpm), color: "#3b82f6" },
-                      { label: "Fillers", value: String(r.fillerCount), color: "#f59e0b" },
-                      { label: "Energy", value: r.avgMetrics.energyScore.toFixed(2), color: "#8b5cf6" },
-                      { label: "Volume", value: r.avgMetrics.volumeLevel.toFixed(2), color: "#ec4899" },
-                      { label: "Posture", value: r.avgMetrics.postureScore.toFixed(2), color: "#6366f1" },
-                    ].map(({ label, value, color }) => (
-                      <div key={label} style={{ background: "#f8fafc", borderRadius: 8, padding: "8px 6px", textAlign: "center" }}>
-                        <div style={{ fontSize: 15, fontWeight: 800, color }}>{value}</div>
-                        <div style={{ fontSize: 10, color: "#94a3b8" }}>{label}</div>
-                      </div>
-                    ))}
-                  </div>
-                  {r.transcript && (
-                    <p style={{ margin: "10px 0 0", fontSize: 12, color: "#94a3b8", fontStyle: "italic" }}>"{r.transcript.slice(0, 120)}{r.transcript.length > 120 ? "…" : ""}"</p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                ))}
+              </div>
+            </Card>
 
-          <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-            <button onClick={() => { setSegmentResults([]); setCurrentSegmentIdx(0); loadPracticeSession(true); }} style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "12px 28px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
-              ↺ New Practice Session
-            </button>
-            <button onClick={() => router.push("/coach")} style={{ background: "#3b5bdb", color: "#fff", border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-              Go to Coach Mode →
-            </button>
-          </div>
+            {/* Per-segment results */}
+            <div>
+              <p style={{ margin: "0 0 12px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>Segment Breakdown</p>
+              {segmentResults.map((r, i) => {
+                const s = practiceSession?.segments?.[r.segmentIdx];
+                const sfs = s ? FOCUS_STYLES[s.focus] : null;
+                return (
+                  <Card key={i} style={{ marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                      <span style={{ background: sfs?.pill, color: sfs?.accent, borderRadius: "var(--radius-pill)", padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>
+                        {s ? FOCUS_LABELS[s.focus] : ""}
+                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{s?.title}</span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+                      {[
+                        { label: "WPM", value: String(r.wpm), color: "#3b82f6" },
+                        { label: "Fillers", value: String(r.fillerCount), color: "#f59e0b" },
+                        { label: "Energy", value: r.avgMetrics.energyScore.toFixed(2), color: "#8b5cf6" },
+                        { label: "Volume", value: r.avgMetrics.volumeLevel.toFixed(2), color: "#ec4899" },
+                        { label: "Posture", value: r.avgMetrics.postureScore.toFixed(2), color: "#6366f1" },
+                      ].map(({ label, value, color }) => (
+                        <div key={label} style={{ background: "var(--bg)", borderRadius: "var(--radius-xs)", padding: "8px 6px", textAlign: "center" }}>
+                          <div style={{ fontSize: 15, fontWeight: 800, color }}>{value}</div>
+                          <div style={{ fontSize: 10, color: "var(--text-subtle)" }}>{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {r.transcript && (
+                      <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--text-subtle)", fontStyle: "italic" }}>"{r.transcript.slice(0, 120)}{r.transcript.length > 120 ? "…" : ""}"</p>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
 
+          </div>
         </div>
       </div>
     );
@@ -568,240 +595,241 @@ export default function PracticePage() {
   // ── Main practice UI ──────────────────────────────────────────────────────────
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f8fafc", padding: "24px 20px", fontFamily: "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <audio ref={coachAudioRef} style={{ display: "none" }} />
-      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+      <Navbar />
 
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button onClick={() => router.push("/")} style={{ background: "none", border: "none", fontSize: 13, color: "#94a3b8", cursor: "pointer", padding: 0 }}>← Home</button>
-            <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.5px" }}>🎙️ SpeakForge</span>
-            <span style={{ fontSize: 12, color: "#94a3b8" }}>Practice Mode</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {user && <span style={{ fontSize: 13, color: "#475569", fontWeight: 500 }}>Hi, {user.name}</span>}
-            <span style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 14px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: camStatus === "live" ? "#dcfce7" : "#f1f5f9", color: camStatus === "live" ? "#15803d" : "#64748b" }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
-              {camStatus === "live" ? "Live" : "Starting…"}
-            </span>
-            <button onClick={() => { setSegmentResults([]); setCurrentSegmentIdx(0); loadPracticeSession(true); }} style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>↺ Regenerate</button>
-            <button onClick={() => router.push("/coach")} style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Coach Mode</button>
-            <button onClick={signOut} style={{ background: "#f1f5f9", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Sign Out</button>
-          </div>
+      {/* Sub-header */}
+      <div style={{ borderBottom: "1px solid var(--border-light)", padding: "16px 40px", display: "flex", alignItems: "center", gap: 14, background: "rgba(247,250,252,0.8)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", position: "relative", zIndex: 1 }}>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 900, letterSpacing: "-0.6px", color: "var(--text)" }}>Practice <span style={{ color: "var(--gold)" }}>Mode</span></h1>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: camStatus === "live" ? "#22c55e" : "var(--text-muted)" }}>
+          <span className={camStatus === "live" ? "live-dot" : undefined} style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
+          {camStatus === "live" ? "Live" : "Starting…"}
+        </span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button onClick={() => { setSegmentResults([]); setCurrentSegmentIdx(0); loadPracticeSession(true); }} className="btn-ghost" style={{ background: "transparent", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "var(--radius-pill)", padding: "7px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Regenerate</button>
         </div>
+      </div>
 
-        {/* Roadmap stepper */}
-        {practiceSession && (
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: "16px 24px", marginBottom: 16 }}>
-            <p style={{ margin: "0 0 12px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>
-              {practiceSession.sessionTitle}
-            </p>
-            <div style={{ display: "flex", alignItems: "center" }}>
-              {practiceSession.segments.map((s, i) => {
-                const done = segmentResults.some(r => r.segmentIdx === i);
-                const active = i === currentSegmentIdx && !done;
-                const sfs = FOCUS_STYLES[s.focus];
-                return (
-                  <div key={i} style={{ display: "flex", alignItems: "center", flex: 1 }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
-                      <div style={{
-                        width: 34, height: 34, borderRadius: "50%",
-                        background: done ? "#3b5bdb" : active ? sfs.pill : "#f1f5f9",
-                        color: done ? "#fff" : active ? sfs.accent : "#94a3b8",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: done ? 13 : 16, fontWeight: 700,
-                        border: active ? `2px solid ${sfs.accent}` : "2px solid transparent",
-                        transition: "all 0.3s",
-                      }}>
-                        {done ? "✓" : FOCUS_ICONS[s.focus]}
+      <div style={{ padding: "20px 40px 48px", position: "relative", zIndex: 1 }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+
+          {/* Roadmap stepper */}
+          {practiceSession && (
+            <Card style={{ marginBottom: 16, padding: "16px 24px" }}>
+              <p style={{ margin: "0 0 12px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>
+                {practiceSession.sessionTitle}
+              </p>
+              <div style={{ display: "flex", alignItems: "center" }}>
+                {practiceSession.segments.map((s, i) => {
+                  const done = segmentResults.some(r => r.segmentIdx === i);
+                  const active = i === currentSegmentIdx && !done;
+                  const sfs = FOCUS_STYLES[s.focus];
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", flex: 1 }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
+                        <div style={{
+                          width: 34, height: 34, borderRadius: "50%",
+                          background: done ? "var(--gold)" : active ? sfs.pill : "var(--bg)",
+                          color: done ? "var(--dark)" : active ? sfs.accent : "var(--text-muted)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 12, fontWeight: 700,
+                          border: active ? `2px solid ${sfs.accent}` : done ? "2px solid var(--gold)" : "2px solid var(--border)",
+                          transition: "all 0.3s",
+                        }}>
+                          {done ? "✓" : String(i + 1)}
+                        </div>
+                        <span style={{ fontSize: 10, color: active ? sfs.accent : done ? "var(--gold)" : "var(--text-muted)", marginTop: 5, fontWeight: active || done ? 700 : 400, textAlign: "center", maxWidth: 70 }}>
+                          {s.title}
+                        </span>
                       </div>
-                      <span style={{ fontSize: 10, color: active ? sfs.accent : done ? "#3b5bdb" : "#94a3b8", marginTop: 5, fontWeight: active || done ? 700 : 400, textAlign: "center", maxWidth: 70 }}>
-                        {s.title}
-                      </span>
+                      {i < practiceSession.segments.length - 1 && (
+                        <div style={{ height: 2, flex: 0.4, background: done ? "var(--gold)" : "var(--border-light)", marginBottom: 20, transition: "background 0.3s" }} />
+                      )}
                     </div>
-                    {i < practiceSession.segments.length - 1 && (
-                      <div style={{ height: 2, flex: 0.4, background: done ? "#3b5bdb" : "#e2e8f0", marginBottom: 20, transition: "background 0.3s" }} />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Main grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 16, alignItems: "start" }}>
-
-          {/* Left: Video + controls */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <video ref={videoRef} playsInline muted
-              style={{ width: "100%", borderRadius: 16, background: "#0f172a", display: "block", transform: "scaleX(-1)", aspectRatio: "16/9", objectFit: "cover" }}
-            />
-
-            {/* Phase action buttons */}
-            <div style={{ display: "flex", gap: 10 }}>
-              {phase === "listen" && (
-                <>
-                  <button
-                    onClick={() => seg && playCoachAudio(seg.coachIntro + " " + seg.practiceText)}
-                    disabled={audioLoading || audioPlaying}
-                    style={{
-                      flex: 1, borderRadius: 10, padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: audioLoading || audioPlaying ? "not-allowed" : "pointer",
-                      background: audioLoading || audioPlaying ? "#f1f5f9" : "#ede9fe",
-                      color: audioLoading || audioPlaying ? "#94a3b8" : "#6d28d9",
-                      border: "1.5px solid #ddd6fe",
-                    }}
-                  >
-                    {audioLoading ? "⏳ Loading…" : audioPlaying ? "🔊 Playing…" : "🔊 Listen to Coach"}
-                  </button>
-                  {audioPlaying && (
-                    <button
-                      onClick={stopCoachAudio}
-                      style={{ background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fca5a5", borderRadius: 10, padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
-                    >
-                      ⏹ Stop
-                    </button>
-                  )}
-                  <button
-                    onClick={startRecording}
-                    style={{ flex: 1, background: "#dcfce7", color: "#15803d", border: "1.5px solid #86efac", borderRadius: 10, padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
-                  >
-                    🎤 Start Repeating
-                  </button>
-                </>
-              )}
-
-              {phase === "record" && (
-                <button
-                  onClick={stopRecording}
-                  style={{ flex: 1, background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fca5a5", borderRadius: 10, padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                >
-                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />
-                  Done Repeating
-                </button>
-              )}
-
-              {phase === "review" && (
-                <button
-                  onClick={() => nextSegment(segmentResults)}
-                  style={{ flex: 1, background: "#3b5bdb", color: "#fff", border: "none", borderRadius: 10, padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
-                >
-                  {currentSegmentIdx + 1 >= (practiceSession?.segments.length ?? 0) ? "🏁 Finish Practice" : "Next Segment →"}
-                </button>
-              )}
-            </div>
-
-            {/* Transcript box */}
-            {(phase === "record" || phase === "review") && (
-              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: "14px 16px" }}>
-                <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>Your transcript</p>
-                <div style={{ fontSize: 13, color: transcript || recentTranscript ? "#0d1117" : "#cbd5e1", lineHeight: 1.6, maxHeight: 80, overflow: "auto" }}>
-                  {transcript || recentTranscript || "(listening…)"}
-                </div>
+                  );
+                })}
               </div>
-            )}
-          </div>
+            </Card>
+          )}
 
-          {/* Right panel */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* Main grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 16, alignItems: "start" }}>
 
-            {/* Segment card */}
-            {seg && (
-              <div style={{
-                borderRadius: 16, padding: "20px",
-                border: `1.5px solid ${fs ? fs.pill : "#e2e8f0"}`,
-                background: fs ? fs.bg : "#fff",
-                transition: "background 0.4s, border-color 0.4s",
-              }}>
-                {/* Segment header */}
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-                  <span style={{ background: fs?.pill, color: fs?.accent, borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>
-                    {FOCUS_ICONS[seg.focus]} {seg.focus}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#0d1117" }}>{seg.title}</span>
-                  <span style={{ marginLeft: "auto", fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>
-                    {currentSegmentIdx + 1} / {practiceSession?.segments.length}
-                  </span>
-                </div>
+            {/* Left: Video + controls */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ borderRadius: "var(--radius-xl)", overflow: "hidden", boxShadow: "var(--shadow-md)", background: "#0f172a", lineHeight: 0 }}>
+                <video ref={videoRef} playsInline muted
+                  style={{ width: "100%", display: "block", transform: "scaleX(-1)", aspectRatio: "16/9", objectFit: "cover" }}
+                />
+              </div>
 
-                {/* Listen phase: show intro + practice text */}
+              {/* Phase action buttons */}
+              <div style={{ display: "flex", gap: 10 }}>
                 {phase === "listen" && (
                   <>
-                    <p style={{ margin: "0 0 12px", fontSize: 13, color: "#475569", lineHeight: 1.65 }}>{seg.coachIntro}</p>
-                    <div style={{ background: "#fff", borderRadius: 10, border: `1.5px solid ${fs?.pill}`, padding: "14px 16px", marginBottom: 12 }}>
-                      <p style={{ margin: "0 0 6px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>Repeat this aloud:</p>
-                      <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#0d1117", lineHeight: 1.7 }}>{seg.practiceText}</p>
-                    </div>
-                    <p style={{ margin: 0, fontSize: 12, color: fs?.accent, fontWeight: 500 }}>💡 {seg.tip}</p>
-                  </>
-                )}
-
-                {/* Record phase: keep text visible while recording */}
-                {phase === "record" && (
-                  <>
-                    <div style={{ background: "#fff", borderRadius: 10, border: `1.5px solid ${fs?.pill}`, padding: "14px 16px", marginBottom: 12 }}>
-                      <p style={{ margin: "0 0 6px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>Repeat this:</p>
-                      <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#0d1117", lineHeight: 1.7 }}>{seg.practiceText}</p>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#fee2e2", borderRadius: 8, padding: "8px 12px" }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />
-                      <span style={{ fontSize: 13, color: "#dc2626", fontWeight: 600 }}>Recording in progress…</span>
-                    </div>
-                  </>
-                )}
-
-                {/* Review phase: show segment results */}
-                {phase === "review" && lastResult && (
-                  <>
-                    <p style={{ margin: "0 0 12px", fontSize: 13, fontWeight: 700, color: "#0d1117" }}>Segment results</p>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-                      {[
-                        { label: "WPM", value: String(lastResult.wpm), color: "#3b82f6" },
-                        { label: "Fillers", value: String(lastResult.fillerCount), color: "#f59e0b" },
-                        { label: "Energy", value: lastResult.avgMetrics.energyScore.toFixed(2), color: "#8b5cf6" },
-                        { label: "Volume", value: lastResult.avgMetrics.volumeLevel.toFixed(2), color: "#ec4899" },
-                      ].map(({ label, value, color }) => (
-                        <div key={label} style={{ background: "#fff", borderRadius: 10, padding: "10px", textAlign: "center", border: "1px solid #e2e8f0" }}>
-                          <div style={{ fontSize: 20, fontWeight: 800, color }}>{value}</div>
-                          <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>{label}</div>
-                        </div>
-                      ))}
-                    </div>
-                    {lastResult.transcript && (
-                      <p style={{ margin: 0, fontSize: 12, color: "#64748b", fontStyle: "italic", lineHeight: 1.5 }}>
-                        "{lastResult.transcript.slice(0, 100)}{lastResult.transcript.length > 100 ? "…" : ""}"
-                      </p>
+                    <button
+                      onClick={() => seg && playCoachAudio(seg.coachIntro + " " + seg.practiceText)}
+                      disabled={audioLoading || audioPlaying}
+                      style={{
+                        flex: 1, borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700,
+                        cursor: audioLoading || audioPlaying ? "not-allowed" : "pointer",
+                        background: audioLoading || audioPlaying ? "var(--bg)" : "var(--gold-light)",
+                        color: audioLoading || audioPlaying ? "var(--text-muted)" : "var(--gold)",
+                        border: "1.5px solid var(--gold-border)",
+                      }}
+                    >
+                      {audioLoading ? "Loading…" : audioPlaying ? "Playing…" : "Listen to Coach"}
+                    </button>
+                    {audioPlaying && (
+                      <button
+                        onClick={stopCoachAudio}
+                        style={{ background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fca5a5", borderRadius: "var(--radius-pill)", padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+                      >
+                        Stop
+                      </button>
                     )}
+                    <button
+                      onClick={startRecording}
+                      style={{ flex: 1, background: "var(--dark)", color: "#fff", border: "none", borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Start Repeating
+                    </button>
                   </>
                 )}
-              </div>
-            )}
 
-            {/* Live metrics panel */}
-            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "16px 20px" }}>
-              <p style={{ margin: "0 0 14px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#94a3b8" }}>Live Metrics</p>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 20px" }}>
-                {[
-                  { label: "WPM", display: String(wpm), bar: clamp01(wpm / 180), color: "#3b82f6" },
-                  { label: "Fillers", display: String(fillerCount), bar: clamp01(fillerCount / 10), color: "#f59e0b" },
-                  { label: "Gesture", display: gestureEnergy.toFixed(2), bar: gestureEnergy, color: "#10b981" },
-                  { label: "Posture", display: postureScore.toFixed(2), bar: postureScore, color: "#6366f1" },
-                  { label: "Energy", display: energyScore.toFixed(2), bar: energyScore, color: "#8b5cf6" },
-                  { label: "Variation", display: variationScore.toFixed(2), bar: variationScore, color: "#06b6d4" },
-                  { label: "Volume", display: volumeLevel.toFixed(2), bar: volumeLevel, color: "#ec4899" },
-                ].map(({ label, display, bar, color }) => (
-                  <div key={label}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span style={{ color: "#64748b" }}>{label}</span>
-                      <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{display}</span>
-                    </div>
-                    <ScoreBar value={bar} color={color} />
-                  </div>
-                ))}
+                {phase === "record" && (
+                  <button
+                    onClick={stopRecording}
+                    style={{ flex: 1, background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fca5a5", borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                  >
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />
+                    Done Repeating
+                  </button>
+                )}
+
+                {phase === "review" && (
+                  <button
+                    onClick={() => nextSegment(segmentResults)}
+                    style={{ flex: 1, background: "var(--dark)", color: "#fff", border: "none", borderRadius: "var(--radius-pill)", padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    {currentSegmentIdx + 1 >= (practiceSession?.segments.length ?? 0) ? "Finish Practice" : "Next Segment →"}
+                  </button>
+                )}
               </div>
+
+              {/* Transcript box */}
+              {(phase === "record" || phase === "review") && (
+                <Card style={{ padding: "14px 16px" }}>
+                  <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>Your transcript</p>
+                  <div style={{ fontSize: 13, color: transcript || recentTranscript ? "var(--text)" : "var(--text-subtle)", lineHeight: 1.6, maxHeight: 80, overflow: "auto" }}>
+                    {transcript || recentTranscript || "(listening…)"}
+                  </div>
+                </Card>
+              )}
             </div>
 
+            {/* Right panel */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+              {/* Segment card */}
+              {seg && (
+                <div style={{
+                  borderRadius: "var(--radius-lg)", padding: "20px",
+                  border: `1.5px solid ${fs ? fs.pill : "var(--border-light)"}`,
+                  background: fs ? fs.bg : "var(--surface)",
+                  boxShadow: "var(--shadow-sm)",
+                  transition: "background 0.4s, border-color 0.4s",
+                }}>
+                  {/* Segment header */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                    <span style={{ background: fs?.pill, color: fs?.accent, borderRadius: "var(--radius-pill)", padding: "2px 10px", fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>
+                      {FOCUS_LABELS[seg.focus]}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{seg.title}</span>
+                    <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-subtle)", fontWeight: 600 }}>
+                      {currentSegmentIdx + 1} / {practiceSession?.segments.length}
+                    </span>
+                  </div>
+
+                  {/* Listen phase: show intro + practice text */}
+                  {phase === "listen" && (
+                    <>
+                      <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--text-muted)", lineHeight: 1.65 }}>{seg.coachIntro}</p>
+                      <div style={{ background: "var(--surface-solid)", borderRadius: "var(--radius-sm)", border: `1.5px solid ${fs?.pill}`, padding: "14px 16px", marginBottom: 12 }}>
+                        <p style={{ margin: "0 0 6px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>Repeat this aloud:</p>
+                        <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--text)", lineHeight: 1.7 }}>{seg.practiceText}</p>
+                      </div>
+                      <p style={{ margin: 0, fontSize: 12, color: fs?.accent, fontWeight: 500 }}>{seg.tip}</p>
+                    </>
+                  )}
+
+                  {/* Record phase: keep text visible while recording */}
+                  {phase === "record" && (
+                    <>
+                      <div style={{ background: "var(--surface-solid)", borderRadius: "var(--radius-sm)", border: `1.5px solid ${fs?.pill}`, padding: "14px 16px", marginBottom: 12 }}>
+                        <p style={{ margin: "0 0 6px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>Repeat this:</p>
+                        <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--text)", lineHeight: 1.7 }}>{seg.practiceText}</p>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#fee2e2", borderRadius: "var(--radius-xs)", padding: "8px 12px" }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />
+                        <span style={{ fontSize: 13, color: "#dc2626", fontWeight: 600 }}>Recording in progress…</span>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Review phase: show segment results */}
+                  {phase === "review" && lastResult && (
+                    <>
+                      <p style={{ margin: "0 0 12px", fontSize: 13, fontWeight: 700, color: "var(--text)" }}>Segment results</p>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                        {[
+                          { label: "WPM", value: String(lastResult.wpm), color: "#3b82f6" },
+                          { label: "Fillers", value: String(lastResult.fillerCount), color: "#f59e0b" },
+                          { label: "Energy", value: lastResult.avgMetrics.energyScore.toFixed(2), color: "#8b5cf6" },
+                          { label: "Volume", value: lastResult.avgMetrics.volumeLevel.toFixed(2), color: "#ec4899" },
+                        ].map(({ label, value, color }) => (
+                          <div key={label} style={{ background: "var(--bg)", borderRadius: "var(--radius-sm)", padding: "10px", textAlign: "center", border: "1px solid var(--border-light)" }}>
+                            <div style={{ fontSize: 20, fontWeight: 800, color }}>{value}</div>
+                            <div style={{ fontSize: 10, color: "var(--text-subtle)", marginTop: 2 }}>{label}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {lastResult.transcript && (
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", fontStyle: "italic", lineHeight: 1.5 }}>
+                          "{lastResult.transcript.slice(0, 100)}{lastResult.transcript.length > 100 ? "…" : ""}"
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Live metrics panel */}
+              <Card>
+                <p style={{ margin: "0 0 14px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-subtle)" }}>Live Metrics</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 20px" }}>
+                  {[
+                    { label: "WPM", display: String(wpm), bar: clamp01(wpm / 180), color: "#3b82f6" },
+                    { label: "Fillers", display: String(fillerCount), bar: clamp01(fillerCount / 10), color: "#f59e0b" },
+                    { label: "Gesture", display: gestureEnergy.toFixed(2), bar: gestureEnergy, color: "#10b981" },
+                    { label: "Posture", display: postureScore.toFixed(2), bar: postureScore, color: "#6366f1" },
+                    { label: "Energy", display: energyScore.toFixed(2), bar: energyScore, color: "#8b5cf6" },
+                    { label: "Variation", display: variationScore.toFixed(2), bar: variationScore, color: "#06b6d4" },
+                    { label: "Volume", display: volumeLevel.toFixed(2), bar: volumeLevel, color: "#ec4899" },
+                  ].map(({ label, display, bar, color }) => (
+                    <div key={label}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                        <span style={{ color: "var(--text-muted)" }}>{label}</span>
+                        <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{display}</span>
+                      </div>
+                      <ScoreBar value={bar} color={color} />
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+            </div>
           </div>
         </div>
       </div>

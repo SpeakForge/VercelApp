@@ -30,9 +30,9 @@ const FOCUS_STYLES: Record<FocusType, { bg: string; accent: string; pill: string
   content:   { bg: "#fdf2f8", accent: "#9d174d", pill: "#fbcfe8" },
 };
 
-const FOCUS_ICONS: Record<FocusType, string> = {
-  pace: "⏱️", fillers: "🤐", energy: "⚡", variation: "🎵",
-  gestures: "🙌", posture: "🧍", content: "📋",
+const FOCUS_LABELS: Record<FocusType, string> = {
+  pace: "Pace", fillers: "Fillers", energy: "Energy", variation: "Variation",
+  gestures: "Gestures", posture: "Posture", content: "Content",
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ function ScoreBar({ value, color = "#7c6ff7" }: { value: number; color?: string 
         width: `${Math.round(value * 100)}%`,
         background: color,
         borderRadius: 99,
-        transition: "width 0.4s ease",
+        transition: "width 1.2s ease",
       }} />
     </div>
   );
@@ -81,6 +81,9 @@ export default function CoachPage() {
   const rafRef = useRef<number | null>(null);
   const lastHandsRef = useRef<{ t: number; lx: number; ly: number; rx: number; ry: number } | null>(null);
   const lastPoseTimeRef = useRef(0);
+  const gestureSmoothedRef = useRef(0);
+  const postureSmoothedRef = useRef(0);
+  const variationFrameRef = useRef(0);
 
   // Audio refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -234,23 +237,24 @@ export default function CoachPage() {
         // ×14 sensitivity: normal speech hits 0.4–0.7, yelling 0.9+
         const rawLevel = clamp01(Math.sqrt(sumSq / data.length) * 14);
 
-        // Fast attack, slow decay — holds the reading through natural pauses
+        // Heavy smoothing — values drift slowly so the display is readable
         const speaking = rawLevel > 0.04;
         sustainedVolumeRef.current = speaking
-          ? clamp01(sustainedVolumeRef.current * 0.3 + rawLevel * 0.7)
-          : clamp01(sustainedVolumeRef.current * 0.90);
+          ? clamp01(sustainedVolumeRef.current * 0.92 + rawLevel * 0.08)
+          : clamp01(sustainedVolumeRef.current * 0.97);
         sustainedEnergyRef.current = speaking
-          ? clamp01(sustainedEnergyRef.current * 0.4 + rawLevel * 0.6)
-          : clamp01(sustainedEnergyRef.current * 0.93);
+          ? clamp01(sustainedEnergyRef.current * 0.90 + rawLevel * 0.10)
+          : clamp01(sustainedEnergyRef.current * 0.97);
         setVolumeLevel(sustainedVolumeRef.current);
         setEnergyScore(sustainedEnergyRef.current);
 
         const hist = volumeHistoryRef.current;
         hist.push(rawLevel);
-        if (hist.length > 120) hist.shift();
-        // Variation = dynamic range of recent ~40 frames (~670 ms), scaled up
-        if (hist.length >= 10) {
-          const recent = hist.slice(-40);
+        if (hist.length > 180) hist.shift();
+        // Variation: update every 30 frames (~500 ms) over a wider window
+        variationFrameRef.current++;
+        if (variationFrameRef.current % 30 === 0 && hist.length >= 20) {
+          const recent = hist.slice(-120);
           const hi = Math.max(...recent), lo = Math.min(...recent);
           setVariationScore(clamp01((hi - lo) * 6));
         }
@@ -408,7 +412,7 @@ export default function CoachPage() {
     const loop = () => {
       const video = videoRef.current, pose = poseRef.current;
       const now = performance.now();
-      if (video && pose && video.readyState >= 2 && now - lastPoseTimeRef.current >= 66) {
+      if (video && pose && video.readyState >= 2 && now - lastPoseTimeRef.current >= 200) {
         lastPoseTimeRef.current = now;
         const t = now, res = pose.detectForVideo(video, t), lm = res.landmarks?.[0];
         if (lm) {
@@ -418,12 +422,16 @@ export default function CoachPage() {
             const last = lastHandsRef.current;
             if (last) {
               const dt = (t - last.t) / 1000;
-              if (dt > 0) setGestureEnergy(clamp01(
-                (Math.hypot(lw.x - last.lx, lw.y - last.ly) + Math.hypot(rw.x - last.rx, rw.y - last.ry)) / dt / 2.2
-              ));
+              if (dt > 0) {
+                const raw = clamp01((Math.hypot(lw.x - last.lx, lw.y - last.ly) + Math.hypot(rw.x - last.rx, rw.y - last.ry)) / dt / 2.2);
+                gestureSmoothedRef.current = clamp01(gestureSmoothedRef.current * 0.80 + raw * 0.20);
+                setGestureEnergy(gestureSmoothedRef.current);
+              }
             }
             lastHandsRef.current = { t, lx: lw.x, ly: lw.y, rx: rw.x, ry: rw.y };
-            setPostureScore(clamp01(0.65 * clamp01(1 - Math.abs(ls.y - rs.y) * 10) + 0.35 * (nose.y < (ls.y + rs.y) / 2 ? 1 : 0.4)));
+            const rawPosture = clamp01(0.65 * clamp01(1 - Math.abs(ls.y - rs.y) * 10) + 0.35 * (nose.y < (ls.y + rs.y) / 2 ? 1 : 0.4));
+            postureSmoothedRef.current = clamp01(postureSmoothedRef.current * 0.85 + rawPosture * 0.15);
+            setPostureScore(postureSmoothedRef.current);
           }
         }
       }
@@ -446,8 +454,8 @@ export default function CoachPage() {
         {/* Sub-header */}
         <div style={{ borderBottom: "1px solid var(--border-light)", padding: "16px 40px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(247,250,252,0.8)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", position: "relative", zIndex: 1 }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 900, letterSpacing: "-0.6px", color: "var(--text)" }}>Session Summary</h1>
-            <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>SpeakForge · AI Coach</p>
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 900, letterSpacing: "-0.6px", color: "var(--text)" }}>Session <span style={{ color: "var(--gold)" }}>Summary</span></h1>
+            <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>speak<span style={{ color: "var(--gold)", fontWeight: 700 }}>forge</span> · AI Coach</p>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <Button variant="ghost" size="sm" onClick={() => router.push("/")}>← Back</Button>
@@ -461,7 +469,7 @@ export default function CoachPage() {
               {/* Score banner */}
               {summaryLoading ? (
                 <Card style={{ textAlign: "center", color: "var(--text-subtle)", fontSize: 14, padding: "32px" }}>
-                  ✨ Generating your personalized summary…
+                  Generating your personalized summary…
                 </Card>
               ) : summaryResult && (
                 <Card className="anim-scaleIn">
@@ -483,16 +491,16 @@ export default function CoachPage() {
                     </div>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 18 }}>
-                    <div style={{ background: "#f0fdf4", borderRadius: "var(--radius-sm)", padding: "14px 16px" }}>
-                      <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, color: "#15803d" }}>✅ Strengths</p>
+                    <div style={{ background: "var(--gold-light)", borderRadius: "var(--radius-sm)", padding: "14px 16px", border: "1px solid var(--gold-border)" }}>
+                      <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, color: "var(--gold)" }}>Strengths</p>
                       {summaryResult.strengths.map((str, i) => (
-                        <p key={i} style={{ margin: "3px 0", fontSize: 13, color: "#166534" }}>• {str}</p>
+                        <p key={i} style={{ margin: "3px 0", fontSize: 13, color: "var(--text)" }}>• {str}</p>
                       ))}
                     </div>
-                    <div style={{ background: "#fff7ed", borderRadius: "var(--radius-sm)", padding: "14px 16px" }}>
-                      <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, color: "#c2410c" }}>🎯 Improve</p>
+                    <div style={{ background: "var(--bg)", borderRadius: "var(--radius-sm)", padding: "14px 16px", border: "1px solid var(--border-light)" }}>
+                      <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, color: "var(--text-muted)" }}>Areas to Improve</p>
                       {summaryResult.improvements.map((imp, i) => (
-                        <p key={i} style={{ margin: "3px 0", fontSize: 13, color: "#9a3412" }}>• {imp}</p>
+                        <p key={i} style={{ margin: "3px 0", fontSize: 13, color: "var(--text)" }}>• {imp}</p>
                       ))}
                     </div>
                   </div>
@@ -576,7 +584,7 @@ export default function CoachPage() {
 
       {/* Sub-header */}
       <div style={{ borderBottom: "1px solid var(--border-light)", padding: "16px 40px", display: "flex", alignItems: "center", gap: 14, background: "rgba(247,250,252,0.8)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", position: "relative", zIndex: 1 }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 900, letterSpacing: "-0.6px", color: "var(--text)" }}>Live Coach</h1>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 900, letterSpacing: "-0.6px", color: "var(--text)" }}>Live <span style={{ color: "var(--gold)" }}>Coach</span></h1>
         <span style={{
           display: "inline-flex", alignItems: "center", gap: 6,
           fontSize: 12, fontWeight: 600, color: statusColor,
@@ -592,7 +600,7 @@ export default function CoachPage() {
             {/* Planned speech */}
             <Card style={{ padding: "16px 20px" }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>
-                📋 Planned Speech
+                Planned Speech
                 <span style={{ fontWeight: 400, color: "var(--text-subtle)", marginLeft: 8, fontSize: 12 }}>
                   Paste your script so AI can remind you of missing topics
                 </span>
@@ -654,7 +662,7 @@ export default function CoachPage() {
                     onClick={isRecording ? stopRecording : startRecording}
                     style={{ flex: 1, padding: "11px 0" }}
                   >
-                    {isRecording ? "⏹ Stop & Summarize" : "⏺ Start Recording"}
+                    {isRecording ? "Stop & Summarize" : "Start Recording"}
                   </Button>
                   <Button variant="ghost" onClick={clearTranscript}>Clear</Button>
                 </div>
@@ -689,7 +697,7 @@ export default function CoachPage() {
                         fontWeight: 700,
                         textTransform: "uppercase",
                       }}>
-                        {FOCUS_ICONS[feedback.focus]} {feedback.focus}
+                        {FOCUS_LABELS[feedback.focus]}
                       </span>
                     )}
                     <Button
@@ -712,7 +720,7 @@ export default function CoachPage() {
                       borderRadius: "var(--radius-xs)",
                       padding: "7px 12px",
                     }}>
-                      ⚠ {feedbackError}
+                      {feedbackError}
                     </p>
                   )}
                   <p style={{

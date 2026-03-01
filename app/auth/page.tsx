@@ -1,215 +1,181 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
-type Mode = "login" | "register";
+const SLIDES = [
+  {
+    bg: "linear-gradient(145deg, #0a0f1e 0%, #1e3a5f 55%, #004370 100%)",
+    title: "Speak with\nconfidence.",
+    sub: "Real-time AI coaching that transforms how you present.",
+  },
+  {
+    bg: "linear-gradient(145deg, #1a0533 0%, #3b0764 55%, #5b21b6 100%)",
+    title: "Every word\nmatters.",
+    sub: "Track pace, filler words, and vocal variation live.",
+  },
+  {
+    bg: "linear-gradient(145deg, #022c22 0%, #064e3b 55%, #0f766e 100%)",
+    title: "Body language\nis your voice too.",
+    sub: "Posture, gestures, and eye contact — all analysed.",
+  },
+];
 
-export default function AuthPage() {
+const EyeIcon = ({ open }: { open: boolean }) => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    {open ? (
+      <>
+        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+        <line x1="1" y1="1" x2="23" y2="23" />
+      </>
+    ) : (
+      <>
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+        <circle cx="12" cy="12" r="3" />
+      </>
+    )}
+  </svg>
+);
+
+export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("login");
-  const [name, setName] = useState("");
+  const [slide, setSlide] = useState(0);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [showPw, setShowPw] = useState(false);
+  const [focusedField, setFocusedField] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const switchMode = (m: Mode) => { setMode(m); setError(null); };
+  useEffect(() => {
+    const id = setInterval(() => setSlide((s) => (s + 1) % SLIDES.length), 5000);
+    return () => clearInterval(id);
+  }, []);
 
-  const submit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
-      const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/register";
-      const body = mode === "login" ? { email, password } : { name, email, password };
-      const res = await fetch(endpoint, {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Something went wrong");
-      } else {
-        router.push("/coach");
-      }
+      if (!res.ok) { setError(data.error || "Login failed"); return; }
+      router.push("/");
     } catch {
-      setError("Network error — please try again");
+      setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  const inputStyle: React.CSSProperties = {
+  const inputStyle = (field: string): React.CSSProperties => ({
     width: "100%",
-    padding: "10px 14px",
-    borderRadius: 10,
-    border: "1.5px solid #e2e8f0",
+    padding: "13px 16px",
     fontSize: 14,
-    background: "#f8fafc",
-    color: "#0d1117",
-    boxSizing: "border-box",
+    color: "var(--text)",
+    background: "#fff",
+    border: `1.5px solid ${focusedField === field ? "rgba(0,0,0,0.4)" : "var(--border)"}`,
+    borderRadius: 12,
     outline: "none",
+    boxSizing: "border-box",
+    transition: "border-color 0.15s",
     fontFamily: "inherit",
-  };
+  });
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#f4f6ff",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "24px",
-        fontFamily: "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      }}
-    >
-      <div style={{ width: "100%", maxWidth: 420 }}>
+    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)" }}>
 
-        {/* Logo */}
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <Link href="/" style={{ textDecoration: "none" }}>
-            <span style={{ fontSize: 20, fontWeight: 800, color: "#0d1117", letterSpacing: "-0.5px" }}>
-              🎙️ SpeakForge
-            </span>
-          </Link>
+      {/* ── LEFT: Sliding panels ── */}
+      <div className="hide-mobile" style={{ flex: "0 0 48%", position: "relative", overflow: "hidden" }}>
+        {SLIDES.map((s, i) => (
+          <div key={i} style={{ position: "absolute", inset: 0, background: s.bg, opacity: i === slide ? 1 : 0, transition: "opacity 1s ease" }} />
+        ))}
+        <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(rgba(255,255,255,0.03) 1px, transparent 1px)", backgroundSize: "28px 28px", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", top: "18%", left: "25%", width: 320, height: 320, borderRadius: "50%", background: "rgba(255,255,255,0.03)", filter: "blur(70px)", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", bottom: "25%", right: "5%", width: 220, height: 220, borderRadius: "50%", background: "rgba(255,255,255,0.05)", filter: "blur(50px)", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", top: 36, left: 40, fontSize: 15, letterSpacing: "-0.4px" }}>
+          <span style={{ fontWeight: 400, color: "rgba(255,255,255,0.45)" }}>speak</span><span style={{ fontWeight: 700, color: "#bd9f67" }}>forge</span>
         </div>
-
-        {/* Card */}
-        <div style={{
-          background: "#fff",
-          borderRadius: 20,
-          border: "1px solid #e2e8f0",
-          padding: "32px 36px",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.06)",
-        }}>
-
-          {/* Tab toggle */}
-          <div style={{
-            display: "flex",
-            background: "#f8fafc",
-            borderRadius: 10,
-            padding: 4,
-            marginBottom: 28,
-            gap: 4,
-          }}>
-            {(["login", "register"] as Mode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => switchMode(m)}
-                style={{
-                  flex: 1,
-                  padding: "8px",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  border: "none",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  background: mode === m ? "#fff" : "transparent",
-                  color: mode === m ? "#0d1117" : "#94a3b8",
-                  boxShadow: mode === m ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
-                  transition: "all 0.15s",
-                  fontFamily: "inherit",
-                }}
-              >
-                {m === "login" ? "Sign In" : "Create Account"}
-              </button>
+        <div style={{ position: "absolute", bottom: 56, left: 44, right: 44 }}>
+          <div style={{ position: "relative", minHeight: 130 }}>
+            {SLIDES.map((s, i) => (
+              <div key={i} style={{ position: "absolute", inset: 0, opacity: i === slide ? 1 : 0, transform: i === slide ? "translateY(0)" : "translateY(14px)", transition: "opacity 0.8s ease, transform 0.8s ease", pointerEvents: i === slide ? "auto" : "none" }}>
+                <h2 style={{ fontSize: "clamp(26px, 2.8vw, 38px)", fontWeight: 900, color: "#fff", letterSpacing: "-1.8px", lineHeight: 1.05, margin: "0 0 12px", whiteSpace: "pre-line" }}>{s.title}</h2>
+                <p style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", margin: 0, lineHeight: 1.65 }}>{s.sub}</p>
+              </div>
             ))}
           </div>
-
-          <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-
-            {mode === "register" && (
-              <div>
-                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
-                  Name
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Your name"
-                  required
-                  style={inputStyle}
-                />
-              </div>
-            )}
-
-            <div>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
-                Email
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
-                Password
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                style={inputStyle}
-              />
-            </div>
-
-            {error && (
-              <div style={{
-                background: "#fee2e2",
-                color: "#dc2626",
-                borderRadius: 8,
-                padding: "9px 12px",
-                fontSize: 13,
-                fontWeight: 500,
-                border: "1px solid #fca5a5",
-              }}>
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                background: loading ? "#93c5fd" : "#3b5bdb",
-                color: "#fff",
-                border: "none",
-                borderRadius: 10,
-                padding: "12px",
-                fontSize: 15,
-                fontWeight: 700,
-                cursor: loading ? "not-allowed" : "pointer",
-                marginTop: 4,
-                transition: "background 0.2s",
-                fontFamily: "inherit",
-              }}
-            >
-              {loading ? "Please wait…" : mode === "login" ? "Sign In →" : "Create Account →"}
-            </button>
-
-          </form>
+          <div style={{ display: "flex", gap: 6, marginTop: 28 }}>
+            {SLIDES.map((_, i) => (
+              <button key={i} onClick={() => setSlide(i)} style={{ width: i === slide ? 24 : 8, height: 8, borderRadius: 99, background: i === slide ? "#bd9f67" : "rgba(255,255,255,0.28)", border: "none", cursor: "pointer", padding: 0, transition: "all 0.4s cubic-bezier(0.16, 1, 0.3, 1)" }} />
+            ))}
+          </div>
         </div>
+      </div>
 
-        <p style={{ textAlign: "center", marginTop: 20, fontSize: 13, color: "#94a3b8" }}>
-          <Link href="/" style={{ color: "#3b5bdb", textDecoration: "none", fontWeight: 500 }}>
-            ← Back to home
+      {/* ── RIGHT: Form ── */}
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "60px 40px", background: "var(--bg)" }}>
+        <div style={{ width: "100%", maxWidth: 370 }}>
+
+          <Link href="/" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--text-muted)", textDecoration: "none", marginBottom: 52, opacity: 0.8 }}>
+            ← Back
           </Link>
-        </p>
 
+          <h1 style={{ fontSize: "clamp(26px, 3vw, 34px)", fontWeight: 900, letterSpacing: "-1.5px", margin: "0 0 8px", color: "var(--text)", lineHeight: 1.1 }}>
+            Welcome back.
+          </h1>
+          <p style={{ fontSize: 14, color: "var(--text-muted)", margin: "0 0 40px", lineHeight: 1.5 }}>
+            Sign in to your SpeakForge account.
+          </p>
+
+          {error && (
+            <div style={{ background: "#fee2e2", color: "#dc2626", borderRadius: 10, padding: "10px 14px", fontSize: 13, marginBottom: 20 }}>
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 6, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)" }}>Email</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onFocus={() => setFocusedField("email")} onBlur={() => setFocusedField(null)} placeholder="you@example.com" required style={inputStyle("email")} />
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ display: "block", marginBottom: 6, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)" }}>Password</label>
+              <div style={{ position: "relative" }}>
+                <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} onFocus={() => setFocusedField("password")} onBlur={() => setFocusedField(null)} placeholder="••••••••" required style={{ ...inputStyle("password"), paddingRight: 44 }} />
+                <button type="button" onClick={() => setShowPw((v) => !v)} style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--text-subtle)", padding: 0, lineHeight: 1, display: "flex", alignItems: "center" }}>
+                  <EyeIcon open={showPw} />
+                </button>
+              </div>
+            </div>
+
+            <div style={{ textAlign: "right", marginBottom: 32 }}>
+              <a href="#" style={{ fontSize: 13, color: "var(--text-muted)", textDecoration: "none" }}>Forgot password?</a>
+            </div>
+
+            <button type="submit" disabled={loading} className="btn-primary" style={{ width: "100%", padding: "14px", fontSize: 15, fontWeight: 700, color: "#fff", background: loading ? "#94a3b8" : "var(--dark)", border: "none", borderRadius: 12, cursor: loading ? "not-allowed" : "pointer", letterSpacing: "-0.3px", marginBottom: 28 }}>
+              {loading ? "Signing in…" : "Log in"}
+            </button>
+          </form>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
+            <div style={{ flex: 1, height: 1, background: "var(--border-light)" }} />
+            <span style={{ fontSize: 12, color: "var(--text-subtle)" }}>or</span>
+            <div style={{ flex: 1, height: 1, background: "var(--border-light)" }} />
+          </div>
+
+          <p style={{ fontSize: 13, color: "var(--text-muted)", textAlign: "center", margin: 0 }}>
+            Don&apos;t have an account?{" "}
+            <Link href="/signup" style={{ color: "var(--gold)", fontWeight: 700, textDecoration: "none" }}>Sign up</Link>
+          </p>
+        </div>
       </div>
     </div>
   );

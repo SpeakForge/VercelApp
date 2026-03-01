@@ -17,7 +17,7 @@ export default function Navbar() {
   const signOut = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
-    router.refresh();
+    router.push("/");
   };
 
   return (
@@ -32,17 +32,17 @@ export default function Navbar() {
         display: "flex",
         alignItems: "center",
         padding: "0 40px",
-        background: "rgba(247, 250, 252, 0.82)",
-        backdropFilter: "blur(6.73px)",
-        WebkitBackdropFilter: "blur(6.73px)",
-        borderBottom: "1px solid rgba(30, 45, 82, 0.07)",
-        boxShadow: "0 1px 0 rgba(30,45,82,0.06)",
+        background: "rgba(246, 245, 242, 0.88)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+        borderBottom: "1px solid var(--border-light)",
+        boxShadow: "0 1px 0 rgba(0,0,0,0.04)",
       }}
     >
       {/* Brand */}
       <Link href="/" style={{ textDecoration: "none", flexShrink: 0 }}>
-        <span style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", letterSpacing: "-0.4px" }}>
-          <span style={{ opacity: 0.4, fontWeight: 400 }}>speak</span>forge
+        <span style={{ fontSize: 15, letterSpacing: "-0.4px" }}>
+          <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>speak</span><span style={{ fontWeight: 700, color: "var(--gold)" }}>forge</span>
         </span>
       </Link>
 
@@ -52,7 +52,7 @@ export default function Navbar() {
           <button
             className="btn-primary"
             style={{
-              background: "var(--text)", color: "#fff", border: "none",
+              background: "var(--dark)", color: "#fff", border: "none",
               borderRadius: "var(--radius-pill)", padding: "7px 16px",
               fontSize: 13, fontWeight: 600, cursor: "pointer", letterSpacing: "-0.2px",
             }}
@@ -78,9 +78,11 @@ export default function Navbar() {
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
         {user ? (
           <>
-            <span style={{ fontSize: 13, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-              Hi, <strong>{user.name}</strong>
-            </span>
+            <Link href="/profile" style={{ textDecoration: "none" }}>
+              <span style={{ fontSize: 13, color: "var(--text-muted)", whiteSpace: "nowrap", cursor: "pointer" }}>
+                Hi, <strong style={{ color: "var(--text)" }}>{user.name}</strong>
+              </span>
+            </Link>
             <button
               onClick={signOut}
               className="btn-ghost"
@@ -107,11 +109,11 @@ export default function Navbar() {
                 Sign In
               </button>
             </Link>
-            <Link href="/auth">
+            <Link href="/signup">
               <button
                 className="btn-primary"
                 style={{
-                  background: "var(--text)", color: "#fff", border: "none",
+                  background: "var(--dark)", color: "#fff", border: "none",
                   borderRadius: "var(--radius-pill)", padding: "8px 20px",
                   fontSize: 13, fontWeight: 600, cursor: "pointer", letterSpacing: "-0.2px",
                 }}

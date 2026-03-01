@@ -11,8 +11,8 @@ interface SidebarItem {
 }
 
 const ITEMS: SidebarItem[] = [
-  { icon: "🏠", label: "Home",  href: "/" },
-  { icon: "🎙️", label: "Coach", href: "/coach" },
+  { icon: "·", label: "Home",  href: "/" },
+  { icon: "·", label: "Coach", href: "/coach" },
 ];
 
 export default function Sidebar({ children }: { children?: ReactNode }) {
@@ -47,9 +47,8 @@ export default function Sidebar({ children }: { children?: ReactNode }) {
           marginBottom: 28,
         }}
       >
-        <span style={{ fontSize: 22 }}>🎙️</span>
         <span style={{ fontWeight: 800, fontSize: 15, color: "var(--text)", letterSpacing: "-0.3px" }}>
-          SpeakForge
+          <span style={{ opacity: 0.4, fontWeight: 400 }}>speak</span>forge
         </span>
       </div>
 
