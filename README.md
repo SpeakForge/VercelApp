@@ -49,3 +49,13 @@ Analyze metrics and transcript content
 Identify the single biggest speaking weakness in that moment (when the button is pressed)
 Return JSON feedback
 Generate coaching tips (under 6 words)
+
+Tech Stack:
+
+Next.js (App Router): Frontend and API routes
+React (Client Components): Real-time UI updates
+MediaPipe Tasks Vision: Pose and gesture detection
+Web Audio API: Vocal energy and variation analysis
+Web Speech API: Live speech transcription
+Gemini API (generateContent): AI-powered coaching feedback
+TypeScript: Type safety and structured development
