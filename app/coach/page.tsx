@@ -216,7 +216,7 @@ export default function CoachPage() {
         analyser.fftSize = 2048;
         analyserRef.current = analyser;
         src.connect(analyser);
-        audioDataRef.current = new Uint8Array(analyser.fftSize) as Uint8Array<ArrayBuffer>;
+        audioDataRef.current = new Uint8Array(new ArrayBuffer(analyser.fftSize));
         setStatus("live");
       } catch { setStatus("error"); }
     })();
