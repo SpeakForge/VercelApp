@@ -9,7 +9,7 @@ import Button from "../components/Button";
 
 // ── Types & constants ────────────────────────────────────────────────────────
 
-type FocusType = "pace" | "fillers" | "energy" | "variation" | "gestures" | "posture" | "content";
+type FocusType = "pace" | "fillers" | "energy" | "variation" | "gestures" | "posture" | "content" | "positive";
 
 interface GeminiFeedback { feedback: string; focus: FocusType; reason: string; }
 
@@ -28,11 +28,12 @@ const FOCUS_STYLES: Record<FocusType, { bg: string; accent: string; pill: string
   gestures:  { bg: "#f0fdf4", accent: "#166534", pill: "#86efac" },
   posture:   { bg: "#eef2ff", accent: "#3730a3", pill: "#c7d2fe" },
   content:   { bg: "#fdf2f8", accent: "#9d174d", pill: "#fbcfe8" },
+  positive:  { bg: "#f0fdf4", accent: "#15803d", pill: "#bbf7d0" },
 };
 
 const FOCUS_LABELS: Record<FocusType, string> = {
   pace: "Pace", fillers: "Fillers", energy: "Energy", variation: "Variation",
-  gestures: "Gestures", posture: "Posture", content: "Content",
+  gestures: "Gestures", posture: "Posture", content: "Content", positive: "Great job",
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -136,6 +137,7 @@ export default function CoachPage() {
   const [feedback, setFeedback] = useState<GeminiFeedback | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const feedbackLoadingRef = useRef(false);
 
   // Summary state
   const [showSummary, setShowSummary] = useState(false);
@@ -145,6 +147,8 @@ export default function CoachPage() {
     transcript: string; durationSecs: number; wordCount: number;
     fillerCount: number; avgMetrics: MetricsSnapshot;
   } | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [sessionSaved, setSessionSaved] = useState(false);
 
   // Stable refs to avoid stale closures
   const metricsRef = useRef<MetricsSnapshot>({ wpm: 0, fillerCount: 0, gestureEnergy: 0, postureScore: 0, volumeLevel: 0, energyScore: 0, variationScore: 0 });
@@ -175,17 +179,29 @@ export default function CoachPage() {
     return () => clearInterval(id);
   }, [isRecording]);
 
-  // ── Ask Coach (on-demand) ──────────────────────────────────────────────────
+  // Auto-poll Gemini every 5s while recording
+  useEffect(() => {
+    if (!isRecording) return;
+    const id = setInterval(() => {
+      askCoachRef.current();
+    }, 5000);
+    return () => clearInterval(id);
+  }, [isRecording]);
+
+  // ── Ask Coach (on-demand + auto-poll) ────────────────────────────────────
   const askCoach = async () => {
-    if (feedbackLoading) return;
+    if (feedbackLoadingRef.current) return;
+    feedbackLoadingRef.current = true;
     setFeedbackLoading(true);
     setFeedbackError(null);
     try {
+      // Exclude WPM from live feedback — it's still tracked in metricsRef for summary
+      const { wpm: _wpm, ...metricsWithoutWpm } = metricsRef.current;
       const res = await fetch("/api/gemini", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          metrics: metricsRef.current,
+          metrics: metricsWithoutWpm,
           liveTranscript: transcriptRef.current,
           fullSpeech: fullSpeechRef.current,
         }),
@@ -198,15 +214,21 @@ export default function CoachPage() {
       console.error("Gemini error:", e);
       setFeedbackError("Coach unavailable — try again.");
     } finally {
+      feedbackLoadingRef.current = false;
       setFeedbackLoading(false);
     }
   };
+  const askCoachRef = useRef(askCoach);
+  useEffect(() => { askCoachRef.current = askCoach; });
 
   // ── Camera + audio ─────────────────────────────────────────────────────────
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        // Strict Mode cleanup ran while getUserMedia was pending — release and bail
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
         streamRef.current = stream;
         if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
         const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -217,14 +239,27 @@ export default function CoachPage() {
         analyserRef.current = analyser;
         src.connect(analyser);
         audioDataRef.current = new Uint8Array(new ArrayBuffer(analyser.fftSize));
-        setStatus("live");
-      } catch { setStatus("error"); }
+        if (!cancelled) setStatus("live");
+      } catch { if (!cancelled) setStatus("error"); }
     })();
     return () => {
+      cancelled = true;
       if (audioRafRef.current) cancelAnimationFrame(audioRafRef.current);
       audioCtxRef.current?.close();
+      // Release camera/mic so Strict Mode re-mount can re-acquire them
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
     };
   }, []);
+
+  // Re-attach camera when returning from summary (video element remounts)
+  useEffect(() => {
+    if (showSummary) return;
+    if (videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [showSummary]);
 
   // ── Audio analysis loop ────────────────────────────────────────────────────
   useEffect(() => {
@@ -300,7 +335,13 @@ export default function CoachPage() {
         setFillerCount(countFillers(finalFull.trim()));
       }
     };
-    rec.onend = () => { if (isRecordingRef.current) rec.start(); };
+    rec.onend = () => { if (isRecordingRef.current) { try { rec.start(); } catch {} } };
+    rec.onerror = (event: any) => {
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        isRecordingRef.current = false;
+        setIsRecording(false);
+      }
+    };
     recRef.current = rec;
     return () => { rec.stop(); recRef.current = null; };
   }, [SpeechRecognition]);
@@ -308,10 +349,12 @@ export default function CoachPage() {
   // ── Recording handlers ────────────────────────────────────────────────────
   const startRecording = () => {
     if (!recRef.current || isRecordingRef.current) return;
+    isRecordingRef.current = true; // set synchronously — onend can fire before next render
     metricsHistoryRef.current = [];
     sessionStartRef.current = Date.now();
+    audioCtxRef.current?.resume(); // unblock AudioContext suspended by browser autoplay policy
     setIsRecording(true);
-    recRef.current.start();
+    try { recRef.current.start(); } catch {}
   };
 
   const stopRecording = async () => {
@@ -350,25 +393,35 @@ export default function CoachPage() {
       if (res.ok) {
         const data = await res.json();
         setSummaryResult(data);
-
-        // Save full session to DB (fire-and-forget)
-        fetch("/api/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            durationSecs: snap.durationSecs,
-            wordCount: snap.wordCount,
-            fillerCount: snap.fillerCount,
-            transcript: snap.transcript,
-            plannedSpeech: fullSpeechRef.current,
-            avgMetrics: snap.avgMetrics,
-            summary: data,
-            lastFeedback: feedbackRef.current,
-          }),
-        }).catch(e => console.error("Session save error:", e));
       }
     } catch (e) { console.error("Summary error:", e); }
     finally { setSummaryLoading(false); }
+  };
+
+  const saveSession = async () => {
+    if (isSaving || sessionSaved || !summarySnapshot) return;
+    setIsSaving(true);
+    try {
+      await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          durationSecs: summarySnapshot.durationSecs,
+          wordCount: summarySnapshot.wordCount,
+          fillerCount: summarySnapshot.fillerCount,
+          transcript: summarySnapshot.transcript,
+          plannedSpeech: fullSpeechRef.current,
+          avgMetrics: summarySnapshot.avgMetrics,
+          summary: summaryResult,
+          lastFeedback: feedbackRef.current,
+        }),
+      });
+      setSessionSaved(true);
+    } catch (e) {
+      console.error("Session save error:", e);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const clearTranscript = () => {
@@ -380,6 +433,7 @@ export default function CoachPage() {
     setShowSummary(false); setSummaryResult(null); setSummarySnapshot(null);
     setTranscript(""); setRecentTranscript(""); setStartedAt(null);
     setWpm(0); setFillerCount(0); setFeedback(null); setFeedbackError(null);
+    setIsSaving(false); setSessionSaved(false);
     metricsHistoryRef.current = []; sessionStartRef.current = null;
   };
 
@@ -466,7 +520,23 @@ export default function CoachPage() {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <Button variant="ghost" size="sm" onClick={() => router.push("/")}>← Back</Button>
-            <Button variant="primary" size="sm" onClick={restartSession}>↺ New Session</Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={restartSession}
+              style={{ color: "#dc2626", borderColor: "#fca5a5" }}
+            >
+              Discard Session
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={saveSession}
+              disabled={isSaving || sessionSaved}
+              style={sessionSaved ? { background: "#15803d", borderColor: "#15803d" } : {}}
+            >
+              {sessionSaved ? "Saved!" : isSaving ? "Saving…" : "Save Session"}
+            </Button>
           </div>
         </div>
 
@@ -569,7 +639,23 @@ export default function CoachPage() {
               {/* Bottom buttons */}
               <div style={{ display: "flex", gap: 12, justifyContent: "center", paddingTop: 4 }}>
                 <Button variant="ghost" size="md" onClick={() => router.push("/")}>← Back to Home</Button>
-                <Button variant="primary" size="md" onClick={restartSession}>↺ Start New Session</Button>
+                <Button
+                  variant="ghost"
+                  size="md"
+                  onClick={restartSession}
+                  style={{ color: "#dc2626", borderColor: "#fca5a5" }}
+                >
+                  Discard Session
+                </Button>
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={saveSession}
+                  disabled={isSaving || sessionSaved}
+                  style={sessionSaved ? { background: "#15803d", borderColor: "#15803d" } : {}}
+                >
+                  {sessionSaved ? "Saved!" : isSaving ? "Saving…" : "Save Session"}
+                </Button>
               </div>
 
             </div>
@@ -707,15 +793,11 @@ export default function CoachPage() {
                         {FOCUS_LABELS[feedback.focus]}
                       </span>
                     )}
-                    <Button
-                      variant={feedbackLoading ? "ghost" : "primary"}
-                      size="sm"
-                      onClick={askCoach}
-                      disabled={feedbackLoading}
-                      style={{ marginLeft: "auto", padding: "5px 14px", fontSize: 12 }}
-                    >
-                      {feedbackLoading ? "Analyzing…" : "Ask Coach"}
-                    </Button>
+                    {feedbackLoading && (
+                      <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-subtle)", fontWeight: 600 }}>
+                        Analyzing…
+                      </span>
+                    )}
                   </div>
 
                   {feedbackError && (
@@ -738,7 +820,7 @@ export default function CoachPage() {
                     color: fs ? fs.accent : "var(--text-subtle)",
                     transition: "color 0.5s",
                   }}>
-                    {feedback ? feedback.feedback : status === "live" ? "Press Ask Coach for feedback" : "Waiting for camera…"}
+                    {feedback ? feedback.feedback : status === "live" ? "Feedback will appear once recording starts…" : "Waiting for camera…"}
                   </p>
                   {feedback?.reason && (
                     <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.55 }}>

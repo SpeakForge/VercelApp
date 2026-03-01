@@ -11,9 +11,9 @@ export async function POST(req: NextRequest) {
     const { metrics, liveTranscript, fullSpeech } = await req.json();
 
     const prompt = `You are a live speaking coach. Reply with JSON only.
-feedback: max 6 words, punchy action verb (e.g. "Slow down, pause between ideas")
-focus: the single biggest issue
-reason: max 5 words explaining why
+feedback: max 6 words — if things look good, give an encouraging compliment (e.g. "You're doing great!", "Keep it up!", "Excellent energy!"); otherwise give a punchy corrective tip (e.g. "Slow down, pause between ideas")
+focus: the single biggest issue, or "positive" if the speaker is performing well overall
+reason: max 5 words explaining the feedback
 
 Metrics: ${JSON.stringify(metrics)}
 Transcript: ${liveTranscript || "(none)"}
@@ -33,7 +33,7 @@ Planned: ${fullSpeech || "(none)"}`;
               type: "object",
               properties: {
                 feedback: { type: "string" },
-                focus: { type: "string", enum: ["pace","fillers","energy","variation","gestures","posture","content"] },
+                focus: { type: "string", enum: ["pace","fillers","energy","variation","gestures","posture","content","positive"] },
                 reason: { type: "string" },
               },
               required: ["feedback", "focus", "reason"],
